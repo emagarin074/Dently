@@ -1,0 +1,33 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: dently_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: dently
+      POSTGRES_PASSWORD: dently
+      POSTGRES_DB: dently
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    image: node:20-alpine
+    container_name: dently_app_dev
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://dently:dently@postgres:5432/dently
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    command: sh -c "npm install && npx prisma generate && npm run dev"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
