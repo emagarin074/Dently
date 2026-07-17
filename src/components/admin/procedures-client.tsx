@@ -255,7 +255,7 @@ function ProcedureForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="space-y-6 max-h-[70vh] overflow-y-auto pr-1"
+      className="space-y-6 max-h-[70vh] overflow-y-auto p-1.5"
     >
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2 col-span-2">
@@ -578,7 +578,7 @@ export function ProceduresClient({
               <Plus className="h-4.5 w-4.5 mr-1" /> New Procedure
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl rounded-2xl border-slate-200/60 shadow-2xl">
+          <DialogContent className="max-w-3xl rounded-2xl border-slate-200/60 shadow-2xl">
             <DialogHeader>
               <DialogTitle className="text-base font-extrabold text-slate-900 tracking-tight">
                 {editing ? "Edit Procedure" : "Create Procedure"}
