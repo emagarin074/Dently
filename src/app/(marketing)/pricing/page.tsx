@@ -1,10 +1,10 @@
-import Link from "next/link"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { CheckCircle } from "lucide-react"
-import type { Metadata } from "next"
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CheckCircle } from "lucide-react";
+import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Pricing" }
+export const metadata: Metadata = { title: "Pricing" };
 
 const plans = [
   {
@@ -12,9 +12,16 @@ const plans = [
     price: "₱999",
     period: "/month",
     description: "Perfect for solo practitioners and small clinics.",
-    features: ["1 dentist account", "Up to 200 patients/month", "Online booking", "Calendar management", "Basic queue", "Basic reports"],
+    features: [
+      "1 dentist account",
+      "Up to 200 patients/month",
+      "Online booking",
+      "Calendar management",
+      "Basic queue",
+      "Basic reports",
+    ],
     cta: "Start Free Trial",
-    href: "/register",
+    href: "/register?plan=Starter",
     popular: false,
   },
   {
@@ -34,7 +41,7 @@ const plans = [
       "Priority support",
     ],
     cta: "Start Free Trial",
-    href: "/register",
+    href: "/register?plan=Clinic",
     popular: true,
   },
   {
@@ -42,12 +49,19 @@ const plans = [
     price: "Custom",
     period: "",
     description: "For large clinics, chains, and custom integrations.",
-    features: ["Unlimited dentists", "Multi-branch support", "Custom SMTP", "Custom templates", "API access", "Dedicated support"],
+    features: [
+      "Unlimited dentists",
+      "Multi-branch support",
+      "Custom SMTP",
+      "Custom templates",
+      "API access",
+      "Dedicated support",
+    ],
     cta: "Contact Us",
     href: "/contact",
     popular: false,
   },
-]
+];
 
 export default function PricingPage() {
   return (
@@ -62,15 +76,22 @@ export default function PricingPage() {
 
         <div className="grid grid-cols-1 gap-8 md:grid-cols-3 max-w-5xl mx-auto">
           {plans.map((plan) => (
-            <Card key={plan.name} className={`relative ${plan.popular ? "border-primary shadow-xl" : ""}`}>
+            <Card
+              key={plan.name}
+              className={`relative ${plan.popular ? "border-primary shadow-xl" : ""}`}
+            >
               {plan.popular && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-primary text-white text-xs font-semibold px-3 py-1 rounded-full">Most Popular</span>
+                  <span className="bg-primary text-white text-xs font-semibold px-3 py-1 rounded-full">
+                    Most Popular
+                  </span>
                 </div>
               )}
               <CardHeader>
                 <CardTitle className="text-xl">{plan.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">{plan.description}</p>
+                <p className="text-sm text-muted-foreground">
+                  {plan.description}
+                </p>
                 <div className="flex items-baseline gap-1 mt-3">
                   <span className="text-4xl font-bold">{plan.price}</span>
                   <span className="text-muted-foreground">{plan.period}</span>
@@ -85,7 +106,11 @@ export default function PricingPage() {
                     </li>
                   ))}
                 </ul>
-                <Button className="w-full" variant={plan.popular ? "default" : "outline"} asChild>
+                <Button
+                  className="w-full"
+                  variant={plan.popular ? "default" : "outline"}
+                  asChild
+                >
                   <Link href={plan.href}>{plan.cta}</Link>
                 </Button>
               </CardContent>
@@ -95,11 +120,15 @@ export default function PricingPage() {
 
         <div className="mt-16 text-center">
           <p className="text-muted-foreground text-sm">
-            All plans include SSL security, automatic backups, and unlimited appointments.{" "}
-            <Link href="/contact" className="text-primary hover:underline">Contact us</Link> for custom pricing.
+            All plans include SSL security, automatic backups, and unlimited
+            appointments.{" "}
+            <Link href="/contact" className="text-primary hover:underline">
+              Contact us
+            </Link>{" "}
+            for custom pricing.
           </p>
         </div>
       </div>
     </div>
-  )
+  );
 }

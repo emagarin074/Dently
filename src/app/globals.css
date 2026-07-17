@@ -67,8 +67,27 @@ body {
 }
 
 @media print {
-  .no-print { display: none !important; }
-  .print-only { display: block !important; }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
 }
 
-.print-only { display: none; }
+.print-only {
+  display: none;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-page-fade {
+  animation: fadeIn 0.3s ease-out forwards;
+}
