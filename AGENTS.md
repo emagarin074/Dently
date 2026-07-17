@@ -330,10 +330,11 @@ Before creating a new component:
 
 # Pre-Commit & Quality Control
 
-Always verify code correctness and satisfy project pre-commit checks:
+Always verify code correctness and satisfy project pre-commit checks and GitHub CI/CD requirements:
 
 - **Linting & Formatting**: Ensure `npm run lint` passes with zero errors. All styling should align with Prettier formatting parameters.
 - **Type Safety**: Run `npx tsc --noEmit` to guarantee full TypeScript validation.
+- **CI/CD Build & Verification**: Ensure the production build (`npm run build`) compiles successfully without warnings or errors. Code must satisfy all GitHub Actions CI/CD checks (including security scans like Trivy, Next.js build validation, and deployment requirements).
 - **Purity Check**: Avoid invoking impure functions (e.g., `Date.now()`, `Math.random()`) directly inside React component bodies to ensure rendering idempotency. Declare them as external helpers or call them within event handlers/lifecycle hooks.
 - **React Component Declarations**: Never declare nesting component functions inside another component's render body; call them as standard function expressions (`{renderHelper()}`) or extract them outside the component.
 
