@@ -328,6 +328,17 @@ Before creating a new component:
 
 ---
 
+# Pre-Commit & Quality Control
+
+Always verify code correctness and satisfy project pre-commit checks:
+
+- **Linting & Formatting**: Ensure `npm run lint` passes with zero errors. All styling should align with Prettier formatting parameters.
+- **Type Safety**: Run `npx tsc --noEmit` to guarantee full TypeScript validation.
+- **Purity Check**: Avoid invoking impure functions (e.g., `Date.now()`, `Math.random()`) directly inside React component bodies to ensure rendering idempotency. Declare them as external helpers or call them within event handlers/lifecycle hooks.
+- **React Component Declarations**: Never declare nesting component functions inside another component's render body; call them as standard function expressions (`{renderHelper()}`) or extract them outside the component.
+
+---
+
 # Database Principles
 
 Use Prisma.
