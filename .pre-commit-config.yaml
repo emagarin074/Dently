@@ -85,3 +85,14 @@ repos:
         pass_filenames: false
         stages: [pre-push]
         verbose: true
+
+  # 8. Unit Tests
+  - repo: local
+    hooks:
+      - id: unit-tests
+        name: Unit Tests
+        entry: npm run test
+        language: system
+        files: \.(js|jsx|ts|tsx)$
+        pass_filenames: false
+        stages: [pre-commit]
