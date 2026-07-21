@@ -10,8 +10,19 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { WEBSITE_TEMPLATES } from "@/lib/website-builder/templates";
+import {
+  WEBSITE_TEMPLATES,
+  getTemplate,
+} from "@/lib/website-builder/templates";
 import {
   SectionBlock,
   GlobalStyles,
@@ -26,7 +37,8 @@ import { SectionEditor } from "./section-editor";
 import { StyleEditor } from "./style-editor";
 import { SectionList } from "./section-list";
 import { AddSectionDialog } from "./add-section-dialog";
-import { Eye, Save, Palette, Layers, Plus } from "lucide-react";
+import { ModernTemplateEditor } from "./modern-template-editor";
+import { Eye, Save, Palette, Layers, Plus, LayoutTemplate } from "lucide-react";
 import Link from "next/link";
 
 interface Props {
@@ -72,6 +84,9 @@ export function WebsiteBuilderClient({
   const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [showAddSection, setShowAddSection] = useState(false);
+  const [confirmTemplateId, setConfirmTemplateId] = useState<string | null>(
+    null,
+  );
 
   async function handleSelectTemplate(templateId: string) {
     const result = await initializeWebsitePage(clinicSlug, templateId);
@@ -82,6 +97,7 @@ export function WebsiteBuilderClient({
       setPage(p);
       setSections(p?.sections || []);
       setGlobalStyles(p?.globalStyles || DEFAULT_GLOBAL_STYLES);
+      setConfirmTemplateId(null);
       toast.success("Template applied!");
     }
   }
@@ -155,6 +171,29 @@ export function WebsiteBuilderClient({
     setShowAddSection(false);
   }
 
+  const renderTemplateGrid = (onSelect: (id: string) => void) => (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {WEBSITE_TEMPLATES.map((t) => (
+        <Card
+          key={t.id}
+          className="cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+          onClick={() => onSelect(t.id)}
+        >
+          <CardHeader className="text-center pb-2">
+            <div className="text-4xl mb-2">{t.preview}</div>
+            <CardTitle className="text-lg">{t.name}</CardTitle>
+            <CardDescription>{t.description}</CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <p className="text-xs text-muted-foreground text-center">
+              {t.sections.length} sections
+            </p>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+
   // Template picker (no page configured yet)
   if (!page) {
     return (
@@ -166,31 +205,117 @@ export function WebsiteBuilderClient({
             can fully customize it after.
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {WEBSITE_TEMPLATES.map((t) => (
-            <Card
-              key={t.id}
-              className="cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-              onClick={() => handleSelectTemplate(t.id)}
-            >
-              <CardHeader className="text-center pb-2">
-                <div className="text-4xl mb-2">{t.preview}</div>
-                <CardTitle className="text-lg">{t.name}</CardTitle>
-                <CardDescription>{t.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <p className="text-xs text-muted-foreground text-center">
-                  {t.sections.length} sections
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        {renderTemplateGrid(handleSelectTemplate)}
       </div>
     );
   }
 
   const activeSectionData = sections.find((s) => s.id === selectedSection);
+  const currentTemplate = getTemplate(page.templateId);
+  const isRigid = currentTemplate?.templateType === "rigid";
+
+  if (isRigid) {
+    return (
+      <div className="space-y-4">
+        {/* Top bar */}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-xl font-bold">Template Editor</h2>
+            <p className="text-sm text-muted-foreground">
+              Customize your {currentTemplate?.name} template
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmTemplateId("show-picker")}
+            >
+              <LayoutTemplate className="h-4 w-4 mr-1" /> Change Template
+            </Button>
+            <Link href={`/clinic/${clinicSlug}`} target="_blank">
+              <Button variant="outline" size="sm">
+                <Eye className="h-4 w-4 mr-1" /> Preview
+              </Button>
+            </Link>
+            <Button onClick={handleSave} size="sm" disabled={saving}>
+              <Save className="h-4 w-4 mr-1" /> {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+
+        <ModernTemplateEditor
+          section={sections[0]}
+          onUpdateContent={(content) =>
+            handleUpdateContent(sections[0].id, content)
+          }
+        />
+
+        {/* Dialog for changing templates from the rigid editor */}
+        <Dialog
+          open={confirmTemplateId === "show-picker"}
+          onOpenChange={(open) => !open && setConfirmTemplateId(null)}
+        >
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>Choose a Template</DialogTitle>
+              <DialogDescription>
+                Warning: Selecting a new template will overwrite your current
+                content.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="max-h-[60vh] overflow-y-auto p-4">
+              {renderTemplateGrid((id) => {
+                setConfirmTemplateId(id);
+              })}
+            </div>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setConfirmTemplateId(null)}
+              >
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Confirmation dialog for actual template switch */}
+        <Dialog
+          open={!!confirmTemplateId && confirmTemplateId !== "show-picker"}
+          onOpenChange={(open) => !open && setConfirmTemplateId(null)}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Apply Template</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to apply this template? This will
+                overwrite your current sections and global styles. This action
+                cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button
+                variant="outline"
+                onClick={() => setConfirmTemplateId(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() =>
+                  confirmTemplateId &&
+                  confirmTemplateId !== "show-picker" &&
+                  handleSelectTemplate(confirmTemplateId)
+                }
+              >
+                Apply Template
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -221,6 +346,9 @@ export function WebsiteBuilderClient({
           </TabsTrigger>
           <TabsTrigger value="styles">
             <Palette className="h-4 w-4 mr-1" /> Styles
+          </TabsTrigger>
+          <TabsTrigger value="templates">
+            <LayoutTemplate className="h-4 w-4 mr-1" /> Templates
           </TabsTrigger>
         </TabsList>
 
@@ -254,6 +382,7 @@ export function WebsiteBuilderClient({
                 <SectionEditor
                   section={activeSectionData}
                   clinic={clinic}
+                  sections={sections}
                   onUpdateContent={(content) =>
                     handleUpdateContent(activeSectionData.id, content)
                   }
@@ -278,6 +407,19 @@ export function WebsiteBuilderClient({
         <TabsContent value="styles">
           <StyleEditor globalStyles={globalStyles} onChange={setGlobalStyles} />
         </TabsContent>
+
+        <TabsContent value="templates">
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold">Choose a Template</h3>
+              <p className="text-sm text-muted-foreground">
+                Warning: Selecting a new template will overwrite your current
+                sections and styles.
+              </p>
+            </div>
+            {renderTemplateGrid((id) => setConfirmTemplateId(id))}
+          </div>
+        </TabsContent>
       </Tabs>
 
       {showAddSection && (
@@ -287,6 +429,37 @@ export function WebsiteBuilderClient({
           onClose={() => setShowAddSection(false)}
         />
       )}
+
+      <Dialog
+        open={!!confirmTemplateId}
+        onOpenChange={(open) => !open && setConfirmTemplateId(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apply Template</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to apply this template? This will overwrite
+              your current sections and global styles. This action cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmTemplateId(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                confirmTemplateId && handleSelectTemplate(confirmTemplateId)
+              }
+            >
+              Apply Template
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

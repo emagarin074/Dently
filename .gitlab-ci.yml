@@ -1,0 +1,16 @@
+stages:
+  - test
+
+include:
+  - template: Jobs/Dependency-Scanning.gitlab-ci.yml
+
+dependency_scanning:
+  stage: test
+  rules:
+    # Cost Optimization: Only run scanning on Merge Requests or the default branch
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  variables:
+    # Secure Auth: Pass the NPM token (configured in GitLab CI/CD variables) to access private dependencies
+    # Remember to mask this variable in GitLab settings to prevent leaks!
+    NPM_TOKEN: "$NPM_AUTH_TOKEN"

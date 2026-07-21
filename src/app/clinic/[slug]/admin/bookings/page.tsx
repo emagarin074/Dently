@@ -1,45 +1,76 @@
-import { requireAuth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { redirect } from "next/navigation"
-import { AdminHeader } from "@/components/admin/header"
-import { BookingsClient } from "@/components/admin/bookings-client"
-import type { Metadata } from "next"
+import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { redirect } from "next/navigation";
+import { AdminHeader } from "@/components/admin/header";
+import { BookingsClient } from "@/components/admin/bookings-client";
+import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Appointments" }
+export const metadata: Metadata = { title: "Appointments" };
 
 interface Props {
-  params: Promise<{ slug: string }>
-  searchParams: Promise<{ tab?: string }>
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ tab?: string; page?: string }>;
 }
 
 export default async function BookingsPage({ params, searchParams }: Props) {
-  const { slug } = await params
-  const { tab } = await searchParams
-  const user = await requireAuth(slug)
-  if (!user) redirect(`/clinic/${slug}/login`)
+  const { slug } = await params;
+  const { tab, page } = await searchParams;
+  const user = await requireAuth(slug);
+  if (!user) redirect(`/clinic/${slug}/login`);
 
-  const today = new Date(); today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1)
+  const take = 20;
+  const skip = (parseInt(page || "1") - 1) * take;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
 
   const procedureSelect = {
-    id: true, name: true, category: true, priceType: true,
-    price: true, priceMin: true, priceMax: true,
-    hasOdontogram: true, hasToothSurface: true, hasUpperLower: true,
-    hasMaterial: true, hasShade: true, hasSeverity: true, hasRemarks: true,
+    id: true,
+    name: true,
+    category: true,
+    priceType: true,
+    price: true,
+    priceMin: true,
+    priceMax: true,
+    hasOdontogram: true,
+    hasToothSurface: true,
+    hasUpperLower: true,
+    hasMaterial: true,
+    hasShade: true,
+    hasSeverity: true,
+    hasRemarks: true,
     requireSignedConsent: true,
     consentTemplate: { select: { content: true, name: true } },
-  }
+    priceRules: true,
+  };
 
-  const [requests, todaySchedule, todayQueue, procedures, dentists, patients] = await Promise.all([
+  const [
+    requests,
+    requestsTotal,
+    todaySchedule,
+    todayQueue,
+    procedures,
+    dentists,
+    patients,
+  ] = await Promise.all([
     // Tab 1 – pending booking requests (all future)
     prisma.appointment.findMany({
       where: { clinicId: user.clinicId, status: "PENDING" },
       include: {
-        patient: { select: { id: true, firstName: true, lastName: true, phone: true } },
+        patient: {
+          select: { id: true, firstName: true, lastName: true, phone: true },
+        },
         dentist: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take,
+      skip,
+    }),
+
+    prisma.appointment.count({
+      where: { clinicId: user.clinicId, status: "PENDING" },
     }),
 
     // Tab 2 – today's schedule (CONFIRMED or CHECKED_IN for today)
@@ -86,15 +117,20 @@ export default async function BookingsPage({ params, searchParams }: Props) {
       select: { id: true, firstName: true, lastName: true, phone: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
-
-  ])
+  ]);
 
   return (
     <>
-      <AdminHeader clinicSlug={slug} title="Appointments" userName={user.name} />
+      <AdminHeader
+        clinicSlug={slug}
+        title="Appointments"
+        userName={user.name}
+      />
       <main className="flex-1 p-4 lg:p-6">
         <BookingsClient
           requests={JSON.parse(JSON.stringify(requests))}
+          requestsTotal={requestsTotal}
+          page={parseInt(page || "1")}
           todaySchedule={JSON.parse(JSON.stringify(todaySchedule))}
           todayQueue={JSON.parse(JSON.stringify(todayQueue))}
           procedures={JSON.parse(JSON.stringify(procedures))}
@@ -106,5 +142,5 @@ export default async function BookingsPage({ params, searchParams }: Props) {
         />
       </main>
     </>
-  )
+  );
 }

@@ -12,6 +12,14 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Scratch / one-off utility files
+    "scratch.tsx",
+    "scratch2.ts",
+    "scratch3.ts",
+    "query.ts",
+    "test-route.js",
+    "test-update.ts",
+    "generate-svgs.js",
   ]),
 ]);
 

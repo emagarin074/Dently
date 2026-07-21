@@ -299,7 +299,9 @@ Prioritize:
 - Speed
 - Accessibility
 - Tablet usability
-- Consistency
+- Consistency (Ensure designs are uniform across the application. For example, modal designs must match existing modal design patterns instead of reinventing new layouts.)
+- Action Confirmations (Destructive or state-changing actions like Accept, Decline, or Delete MUST always have a confirmation dialog to prevent accidental misclicks.)
+- Pagination (When displaying a list or a table, we should always have pagination.)
 
 Inspiration:
 
@@ -337,7 +339,7 @@ Always verify code correctness and satisfy project pre-commit checks and GitHub 
 - **CI/CD Build & Verification**: Ensure the production build (`npm run build`) compiles successfully without warnings or errors. Code must satisfy all GitHub Actions CI/CD checks (including security scans like Trivy, Next.js build validation, and deployment requirements).
 - **Purity Check**: Avoid invoking impure functions (e.g., `Date.now()`, `Math.random()`) directly inside React component bodies to ensure rendering idempotency. Declare them as external helpers or call them within event handlers/lifecycle hooks.
 - **React Component Declarations**: Never declare nesting component functions inside another component's render body; call them as standard function expressions (`{renderHelper()}`) or extract them outside the component.
-- **No Automatic Git Push**: Never run `git push` automatically without the user's explicit request. Always keep the commit local and ask before pushing.
+- **No Automatic Git Stage, Commit, or Push**: Never run `git add`, `git commit`, or `git push` commands. The agent must only edit files in the workspace and verify correctness using compilation, typecheck, or lint tools. Staging, committing, and pushing must be handled exclusively by the user.
 
 ---
 

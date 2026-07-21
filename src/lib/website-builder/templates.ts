@@ -5,6 +5,7 @@ export interface WebsiteTemplate {
   name: string;
   description: string;
   preview: string; // emoji or icon identifier
+  templateType?: "builder" | "rigid"; // 'builder' = modular sections, 'rigid' = fixed layout
   sections: SectionBlock[];
   globalStyles: GlobalStyles;
 }
@@ -30,10 +31,10 @@ function createSection(
 export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
   {
     id: "modern",
-    name: "Modern",
-    description:
-      "Clean, professional layout with bold hero section and smooth sections",
+    name: "Modern (Template Mode)",
+    description: "Clean, professional independent template layout.",
     preview: "✨",
+    templateType: "rigid",
     globalStyles: {
       primaryColor: "#0891b2",
       secondaryColor: "#0e7490",
@@ -42,18 +43,37 @@ export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
       buttonStyle: "solid",
     },
     sections: [
-      createSection("hero-1", "hero", 0, { layout: "centered" }),
-      createSection("services-1", "services", 1, { layout: "grid" }),
-      createSection("team-1", "team", 2, { layout: "cards" }),
-      createSection("cta-1", "cta", 3, {
-        style: {
-          backgroundColor: "#0891b2",
-          textColor: "#ffffff",
-          padding: "lg",
+      {
+        id: "modern-data-1",
+        type: "modern_data" as SectionBlock["type"],
+        enabled: true,
+        order: 0,
+        layout: "default",
+        content: {
+          navLinks: [
+            { label: "Services", sectionId: "services" },
+            { label: "About Us", sectionId: "about" },
+            { label: "Doctors", sectionId: "doctors" },
+            { label: "Blogs", sectionId: "blogs" },
+          ],
+          heroBadgeIcon: "plane",
+          heroBadgeText: "True 24/7",
+          heroBadgeSub: "Care When It Counts",
+          heroHeadingMain: "A calmer",
+          heroHeadingHighlight: "dental\nvisit starts here.",
+          heroSubheading:
+            "Modern dentistry designed around your comfort.\nFrom routine checkups to advanced care, we make dental visits simple, clear, and stress-free.",
+          heroCtaText: "Contact Us",
+          heroDentistCount: "15+",
+          heroDentistText: "Expert Dentists for you",
+          heroPills: [
+            { label: "Teeth Cleaning", checked: true },
+            { label: "Whitening", checked: false },
+            { label: "Lost Filling", checked: false },
+          ],
         },
-      }),
-      createSection("booking-1", "booking", 4),
-      createSection("contact-1", "contact", 5),
+        style: {},
+      },
     ],
   },
   {

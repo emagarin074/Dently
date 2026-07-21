@@ -18,6 +18,7 @@ import {
   Menu,
   X,
   Globe,
+  MessageSquare,
 } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ const adminLinks = [
   { href: "/documents", label: "Documents", icon: FileText },
   { href: "/reports", label: "Reports", icon: BarChart3 },
   { href: "/website", label: "Website Builder", icon: Globe, adminOnly: true },
+  { href: "/inquiries", label: "Inquiries", icon: MessageSquare },
   { href: "/users", label: "Users", icon: UserCog, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
   { href: "/qr", label: "QR Code", icon: QrCode, adminOnly: true },
@@ -44,6 +46,7 @@ const assistantLinks = [
   { href: "/patients", label: "Patients", icon: Users },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/documents", label: "Documents", icon: FileText },
+  { href: "/inquiries", label: "Inquiries", icon: MessageSquare },
   { href: "/qr", label: "QR Code", icon: QrCode },
 ];
 

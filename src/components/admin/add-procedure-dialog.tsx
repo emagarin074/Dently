@@ -1,43 +1,62 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
-import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Odontogram } from "@/components/ui/odontogram"
-import { addProcedureToAppointment } from "@/app/actions/appointments"
-import { toast } from "sonner"
-import { useRouter } from "next/navigation"
-import { Stethoscope, AlertTriangle, CheckCircle } from "lucide-react"
-import { formatCurrency } from "@/lib/utils"
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Odontogram } from "@/components/ui/odontogram";
+import { addProcedureToAppointment } from "@/app/actions/appointments";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { Stethoscope, AlertTriangle, CheckCircle } from "lucide-react";
+import { formatCurrency } from "@/lib/utils";
 
 export interface ProcedureOption {
-  id: string
-  name: string
-  category: string | null
-  priceType: string
-  price: unknown
-  priceMin: unknown
-  priceMax: unknown
-  hasOdontogram: boolean
-  hasToothSurface: boolean
-  hasUpperLower: boolean
-  hasMaterial: boolean
-  hasShade: boolean
-  hasSeverity: boolean
-  hasRemarks: boolean
-  requireSignedConsent: boolean
-  consentTemplate: { content: string; name: string } | null
+  id: string;
+  name: string;
+  category: string | null;
+  priceType: string;
+  price: unknown;
+  priceMin: unknown;
+  priceMax: unknown;
+  hasOdontogram: boolean;
+  hasToothSurface: boolean;
+  hasUpperLower: boolean;
+  hasMaterial: boolean;
+  hasShade: boolean;
+  hasSeverity: boolean;
+  hasRemarks: boolean;
+  hasPhotoUpload: boolean;
+  hasXrayUpload: boolean;
+  hasLabRequest: boolean;
+  requireSignedConsent: boolean;
+  requirePhoto: boolean;
+  requireXray: boolean;
+  requireLabDocs: boolean;
+  consentTemplate: { content: string; name: string } | null;
+  priceRules?: unknown;
 }
 
 interface Props {
-  appointmentId: string
-  clinicSlug: string
-  procedures: ProcedureOption[]
-  trigger?: React.ReactNode
+  appointmentId: string;
+  clinicSlug: string;
+  procedures: ProcedureOption[];
+  trigger?: React.ReactNode;
 }
 
 function buildGenericConsentHtml(procedureName: string) {
@@ -104,67 +123,156 @@ function buildGenericConsentHtml(procedureName: string) {
 
   <script>window.onload = () => window.print()</script>
 </body>
-</html>`
+</html>`;
+}
+export interface PriceRules {
+  severityPrices?: Record<string, number>;
+  materialPrices?: Array<{ name: string; surcharge: number }>;
+  shadePrices?: Array<{ name: string; surcharge: number }>;
+  toothSurfaceSurcharge?: number;
+  doubleArchSurcharge?: number;
 }
 
-export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trigger }: Props) {
-  const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [selectedId, setSelectedId] = useState("")
-  const [price, setPrice] = useState("")
-  const [teeth, setTeeth] = useState<number[]>([])
-  const [surfaces, setSurfaces] = useState<Record<number, string[]>>({})
-  const [upperLower, setUpperLower] = useState("")
-  const [material, setMaterial] = useState("")
-  const [shade, setShade] = useState("")
-  const [severity, setSeverity] = useState("")
-  const [remarks, setRemarks] = useState("")
-  const [consentFile, setConsentFile] = useState<File | null>(null)
-  const router = useRouter()
+function calculateDynamicPrice(
+  selected: ProcedureOption | undefined,
+  severity: string,
+  material: string,
+  shade: string,
+  surfaces: Record<number, string[]>,
+  upperLower: string,
+) {
+  if (!selected) return 0;
 
-  const selected = procedures.find((p) => p.id === selectedId)
+  let basePrice = 0;
+  if (selected.priceType === "FIXED" && selected.price) {
+    basePrice = Number(selected.price);
+  } else if (selected.priceType === "RANGE" && selected.priceMin) {
+    basePrice = Number(selected.priceMin);
+  }
 
-  function handleSelectProcedure(id: string) {
-    const p = procedures.find((x) => x.id === id)
-    setSelectedId(id)
-    setTeeth([])
-    setSurfaces({})
-    setUpperLower("")
-    setMaterial("")
-    setShade("")
-    setSeverity("")
-    setRemarks("")
-    setConsentFile(null)
-    if (p?.priceType === "FIXED" && p.price) {
-      setPrice(String(p.price))
-    } else {
-      setPrice("")
+  const rules = (selected.priceRules as PriceRules | null) || {};
+  let total = basePrice;
+
+  // 1. Severity Surcharge
+  if (selected.hasSeverity && severity) {
+    const sevSurcharge = rules.severityPrices?.[severity] ?? 0;
+    total += Number(sevSurcharge);
+  }
+
+  // 2. Material Surcharge
+  if (selected.hasMaterial && material) {
+    const matOption = rules.materialPrices?.find(
+      (m) => m.name.toLowerCase() === material.toLowerCase(),
+    );
+    if (matOption) {
+      total += Number(matOption.surcharge);
     }
   }
 
+  // 3. Shade Surcharge
+  if (selected.hasShade && shade) {
+    const shadeOption = rules.shadePrices?.find(
+      (s) => s.name.toLowerCase() === shade.toLowerCase(),
+    );
+    if (shadeOption) {
+      total += Number(shadeOption.surcharge);
+    }
+  }
+
+  // 4. Tooth Surface Surcharge (Rule A)
+  if (selected.hasToothSurface && surfaces) {
+    const totalSurfaces = Object.values(surfaces).reduce(
+      (acc, curr) => acc + (curr?.length || 0),
+      0,
+    );
+    const surfaceFee = rules.toothSurfaceSurcharge ?? 0;
+    total += totalSurfaces * Number(surfaceFee);
+  }
+
+  // 5. Flat Double-Arch Surcharge
+  if (selected.hasUpperLower && upperLower === "BOTH") {
+    const doubleArchFee = rules.doubleArchSurcharge ?? 0;
+    total += Number(doubleArchFee);
+  }
+
+  return total;
+}
+
+export function AddProcedureDialog({
+  appointmentId,
+  clinicSlug,
+  procedures,
+  trigger,
+}: Props) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [selectedId, setSelectedId] = useState("");
+  const [manualPriceOverride, setManualPriceOverride] = useState<string | null>(
+    null,
+  );
+  const [teeth, setTeeth] = useState<number[]>([]);
+  const [surfaces, setSurfaces] = useState<Record<number, string[]>>({});
+  const [upperLower, setUpperLower] = useState("");
+  const [material, setMaterial] = useState("");
+  const [shade, setShade] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [consentFile, setConsentFile] = useState<File | null>(null);
+  const router = useRouter();
+
+  const selected = procedures.find((p) => p.id === selectedId);
+
+  const computedPrice = calculateDynamicPrice(
+    selected,
+    severity,
+    material,
+    shade,
+    surfaces,
+    upperLower,
+  );
+  const currentPrice =
+    manualPriceOverride !== null ? manualPriceOverride : String(computedPrice);
+
+  function handleSelectProcedure(id: string) {
+    setSelectedId(id);
+    setTeeth([]);
+    setSurfaces({});
+    setUpperLower("");
+    setMaterial("");
+    setShade("");
+    setSeverity("");
+    setRemarks("");
+    setConsentFile(null);
+    setManualPriceOverride(null);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!selectedId) return toast.error("Select a procedure")
-    const priceNum = parseFloat(price)
-    if (isNaN(priceNum) || priceNum < 0) return toast.error("Enter a valid price")
+    e.preventDefault();
+    if (!selectedId) return toast.error("Select a procedure");
+    const priceNum = parseFloat(currentPrice);
+    if (isNaN(priceNum) || priceNum < 0)
+      return toast.error("Enter a valid price");
     if (selected?.requireSignedConsent && !consentFile) {
-      return toast.error("Upload a signed consent form to proceed")
+      return toast.error("Upload a signed consent form to proceed");
     }
 
-    setLoading(true)
+    setLoading(true);
 
-    let consentDocument: { base64: string; mimeType: string; fileName: string; fileSize: number } | undefined
+    let consentDocument:
+      | { base64: string; mimeType: string; fileName: string; fileSize: number }
+      | undefined;
     if (selected?.requireSignedConsent && consentFile) {
-      const buffer = await consentFile.arrayBuffer()
-      const bytes = new Uint8Array(buffer)
-      let binary = ""
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+      const buffer = await consentFile.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++)
+        binary += String.fromCharCode(bytes[i]);
       consentDocument = {
         base64: btoa(binary),
         mimeType: consentFile.type || "application/octet-stream",
         fileName: consentFile.name,
         fileSize: consentFile.size,
-      }
+      };
     }
 
     const result = await addProcedureToAppointment(clinicSlug, appointmentId, {
@@ -178,26 +286,30 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
       severity: severity || undefined,
       remarks: remarks || undefined,
       consentDocument,
-    })
+    });
 
     if ("error" in result) {
-      toast.error(result.error)
+      toast.error(result.error);
     } else {
-      toast.success("Procedure added")
-      setOpen(false)
-      setSelectedId("")
-      setPrice("")
-      setConsentFile(null)
-      router.refresh()
+      toast.success("Procedure added");
+      setOpen(false);
+      setSelectedId("");
+      setManualPriceOverride(null);
+      setConsentFile(null);
+      router.refresh();
     }
-    setLoading(false)
+    setLoading(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button size="sm" variant="outline" className="h-7 px-2 text-purple-600 border-purple-200 hover:bg-purple-50">
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-purple-600 border-purple-200 hover:bg-purple-50"
+          >
             <Stethoscope className="h-3 w-3 mr-1" />
             Procedure
           </Button>
@@ -221,7 +333,11 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
                 {procedures.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <span>{p.name}</span>
-                    {p.category && <span className="ml-2 text-xs text-muted-foreground">({p.category})</span>}
+                    {p.category && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        ({p.category})
+                      </span>
+                    )}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -241,18 +357,23 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
                   variant="outline"
                   className="h-7 px-2 text-xs border-amber-300 text-amber-800 hover:bg-amber-100"
                   onClick={() => {
-                    const html = selected?.consentTemplate?.content ?? buildGenericConsentHtml(selected?.name ?? "Dental Procedure")
-                    const blob = new Blob([html], { type: "text/html" })
-                    const url = URL.createObjectURL(blob)
-                    window.open(url, "_blank")
-                    setTimeout(() => URL.revokeObjectURL(url), 10000)
+                    const html =
+                      selected?.consentTemplate?.content ??
+                      buildGenericConsentHtml(
+                        selected?.name ?? "Dental Procedure",
+                      );
+                    const blob = new Blob([html], { type: "text/html" });
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, "_blank");
+                    setTimeout(() => URL.revokeObjectURL(url), 10000);
                   }}
                 >
                   Print / Download Form
                 </Button>
               </div>
               <p className="text-xs text-amber-700">
-                Print the consent form, have the patient sign it, then upload the signed copy below.
+                Print the consent form, have the patient sign it, then upload
+                the signed copy below.
               </p>
               <Input
                 type="file"
@@ -262,7 +383,8 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               />
               {consentFile && (
                 <p className="text-xs text-green-700 flex items-center gap-1">
-                  <CheckCircle className="h-3 w-3" />{consentFile.name}
+                  <CheckCircle className="h-3 w-3" />
+                  {consentFile.name}
                 </p>
               )}
             </div>
@@ -274,18 +396,21 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               <div className="space-y-2">
                 <Label>
                   Price (₱)
-                  {selected.priceType === "RANGE" && selected.priceMin != null && selected.priceMax != null && (
-                    <span className="ml-2 text-xs text-muted-foreground font-normal">
-                      Range: {formatCurrency(Number(selected.priceMin))} – {formatCurrency(Number(selected.priceMax))}
-                    </span>
-                  )}
+                  {selected.priceType === "RANGE" &&
+                    selected.priceMin != null &&
+                    selected.priceMax != null && (
+                      <span className="ml-2 text-xs text-muted-foreground font-normal">
+                        Range: {formatCurrency(Number(selected.priceMin))} –{" "}
+                        {formatCurrency(Number(selected.priceMax))}
+                      </span>
+                    )}
                 </Label>
                 <Input
                   type="number"
                   min="0"
                   step="0.01"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
+                  value={currentPrice}
+                  onChange={(e) => setManualPriceOverride(e.target.value)}
                   placeholder="0.00"
                   readOnly={selected.priceType === "FIXED"}
                   className={selected.priceType === "FIXED" ? "bg-muted" : ""}
@@ -298,7 +423,9 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
                 <div className="space-y-2">
                   <Label>Arch</Label>
                   <Select value={upperLower} onValueChange={setUpperLower}>
-                    <SelectTrigger><SelectValue placeholder="Select arch..." /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select arch..." />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="UPPER">Upper</SelectItem>
                       <SelectItem value="LOWER">Lower</SelectItem>
@@ -311,11 +438,21 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               {/* Odontogram */}
               {selected.hasOdontogram && (
                 <div className="space-y-2">
-                  <Label>Tooth Selection {selected.hasToothSurface && <span className="text-xs text-muted-foreground font-normal">— click a tooth then select surfaces</span>}</Label>
+                  <Label>
+                    Tooth Selection{" "}
+                    {selected.hasToothSurface && (
+                      <span className="text-xs text-muted-foreground font-normal">
+                        — click a tooth then select surfaces
+                      </span>
+                    )}
+                  </Label>
                   <Odontogram
                     selectedTeeth={teeth}
                     selectedSurfaces={surfaces}
-                    onChange={(t, s) => { setTeeth(t); setSurfaces(s) }}
+                    onChange={(t, s) => {
+                      setTeeth(t);
+                      setSurfaces(s);
+                    }}
                   />
                 </div>
               )}
@@ -324,7 +461,32 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               {selected.hasMaterial && (
                 <div className="space-y-2">
                   <Label>Material</Label>
-                  <Input value={material} onChange={(e) => setMaterial(e.target.value)} placeholder="e.g. Composite, PFM, Zirconia..." />
+                  {(selected.priceRules as PriceRules | undefined)
+                    ?.materialPrices &&
+                  (selected.priceRules as PriceRules).materialPrices!.length >
+                    0 ? (
+                    <Select value={material} onValueChange={setMaterial}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select material..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(
+                          (selected.priceRules as PriceRules).materialPrices ||
+                          []
+                        ).map((m) => (
+                          <SelectItem key={m.name} value={m.name}>
+                            {m.name} (+{formatCurrency(Number(m.surcharge))})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={material}
+                      onChange={(e) => setMaterial(e.target.value)}
+                      placeholder="e.g. Composite, PFM, Zirconia..."
+                    />
+                  )}
                 </div>
               )}
 
@@ -332,7 +494,31 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               {selected.hasShade && (
                 <div className="space-y-2">
                   <Label>Shade</Label>
-                  <Input value={shade} onChange={(e) => setShade(e.target.value)} placeholder="e.g. A2, B1..." />
+                  {(selected.priceRules as PriceRules | undefined)
+                    ?.shadePrices &&
+                  (selected.priceRules as PriceRules).shadePrices!.length >
+                    0 ? (
+                    <Select value={shade} onValueChange={setShade}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select shade..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(
+                          (selected.priceRules as PriceRules).shadePrices || []
+                        ).map((s) => (
+                          <SelectItem key={s.name} value={s.name}>
+                            {s.name} (+{formatCurrency(Number(s.surcharge))})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      value={shade}
+                      onChange={(e) => setShade(e.target.value)}
+                      placeholder="e.g. A2, B1..."
+                    />
+                  )}
                 </div>
               )}
 
@@ -341,7 +527,9 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
                 <div className="space-y-2">
                   <Label>Severity</Label>
                   <Select value={severity} onValueChange={setSeverity}>
-                    <SelectTrigger><SelectValue placeholder="Select severity..." /></SelectTrigger>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select severity..." />
+                    </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="MILD">Mild</SelectItem>
                       <SelectItem value="MODERATE">Moderate</SelectItem>
@@ -355,20 +543,36 @@ export function AddProcedureDialog({ appointmentId, clinicSlug, procedures, trig
               {selected.hasRemarks && (
                 <div className="space-y-2">
                   <Label>Remarks / Notes</Label>
-                  <Textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Clinical findings, notes..." rows={3} />
+                  <Textarea
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                    placeholder="Clinical findings, notes..."
+                    rows={3}
+                  />
                 </div>
               )}
             </>
           )}
 
           <div className="flex gap-2 pt-2">
-            <Button type="button" variant="outline" className="flex-1" onClick={() => setOpen(false)}>Cancel</Button>
-            <Button type="submit" className="flex-1" disabled={loading || !selectedId}>
+            <Button
+              type="button"
+              variant="outline"
+              className="flex-1"
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={loading || !selectedId}
+            >
               {loading ? "Saving..." : "Add Procedure"}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

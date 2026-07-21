@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { SectionBlock, GlobalStyles } from "@/lib/website-builder/types";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -204,16 +203,75 @@ function HeroSection({
   const heading = (c.heading as string) || clinic.name;
   const subheading = (c.subheading as string) || clinic.description || "";
   const ctaText = (c.ctaText as string) || "Book an Appointment";
+  const navLinks = (c.navLinks as { sectionId: string; label: string }[]) || [];
+
+  // Try to find the booking section dynamically for the CTA link
+  // If we can't search through sections here, we can fallback to the first booking section ID if passed, or just "#booking"
+  // Wait, we don't have all sections in HeroSection. The CTA can point to a section if we pass the booking section ID.
+  // Actually, we can just let CTA link to `#booking` and ensure BookingSection has `id="booking"` AND `id={section.id}` (or just `id="booking"` since CTA is hardcoded).
+  // Wait, user might add multiple booking sections? No, one is typical. I'll stick to `#booking` for CTA. But let's add `id={section.id}`.
+
+  const showNavBar = c.showNavBar !== false;
 
   return (
     <section
+      id={section.id}
       style={{
         ...style,
         backgroundColor: style.backgroundColor || globalStyles.primaryColor,
         color: style.color || "#ffffff",
       }}
+      className="relative"
     >
-      <div className="mx-auto max-w-4xl text-center">
+      {showNavBar && (
+        <nav
+          className="absolute top-0 left-0 right-0 z-10"
+          style={{
+            backgroundColor: (c.navBarBgColor as string) || "transparent",
+            color: (c.navBarTextColor as string) || "inherit",
+          }}
+        >
+          <div className="p-6 flex items-center justify-between max-w-6xl mx-auto w-full">
+            <div className="font-bold text-xl flex items-center">
+              {c.logoUrl ? (
+                <img
+                  src={c.logoUrl as string}
+                  alt="Logo"
+                  className="h-8 w-auto max-w-[150px] object-contain"
+                />
+              ) : c.logoText ? (
+                <span
+                  style={{
+                    fontFamily: FONT_MAP[(c.logoFont as string) || "inter"],
+                  }}
+                >
+                  {c.logoText as string}
+                </span>
+              ) : (
+                <span>{clinic.name}</span>
+              )}
+            </div>
+            <div className="hidden md:flex gap-6 items-center">
+              {navLinks.map((link, i) => (
+                <a
+                  key={i}
+                  href={`#${link.sectionId}`}
+                  className="text-sm font-medium hover:opacity-80 transition-opacity"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </div>
+          </div>
+        </nav>
+      )}
+
+      <div
+        className={`mx-auto max-w-4xl text-center ${showNavBar ? "pt-16" : ""}`}
+        style={
+          c.bannerTextColor ? { color: c.bannerTextColor as string } : undefined
+        }
+      >
         <h1 className="text-4xl md:text-5xl font-bold">{heading}</h1>
         {subheading && (
           <p className="mt-4 text-lg opacity-80 max-w-xl mx-auto">
@@ -286,7 +344,7 @@ function ServicesSection({
         : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-5xl">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold">{heading}</h2>
@@ -340,7 +398,7 @@ function TeamSection({
   const subheading = (c.subheading as string) || "";
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-4xl">
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold">{heading}</h2>
@@ -412,8 +470,10 @@ function BookingSection({
   }
 
   return (
-    <section id="booking" style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-2xl">
+        {/* We keep an anchor for the old hardcoded "#booking" link just in case */}
+        <div id="booking" className="absolute -top-16" />
         <div className="text-center mb-8">
           <h2 className="text-3xl font-bold">{heading}</h2>
           {subheading && (
@@ -539,7 +599,7 @@ function AboutSection({
   const content = (c.content as string) || "";
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-3xl">
         <h2 className="text-3xl font-bold text-center mb-6">{heading}</h2>
         {content && (
@@ -571,7 +631,7 @@ function TestimonialsSection({
   if (items.length === 0) return null;
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-4xl">
         <h2 className="text-3xl font-bold text-center mb-8">{heading}</h2>
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -614,7 +674,7 @@ function FaqSection({
   if (items.length === 0) return null;
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-3xl">
         <h2 className="text-3xl font-bold text-center mb-8">{heading}</h2>
         <div className="space-y-4">
@@ -650,7 +710,7 @@ function ContactSection({
   const heading = (c.heading as string) || "Contact Us";
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-4xl">
         <h2 className="text-3xl font-bold text-center mb-8">{heading}</h2>
         <div className="grid gap-8 sm:grid-cols-2">
@@ -710,6 +770,7 @@ function CtaSection({
 
   return (
     <section
+      id={section.id}
       style={{
         ...style,
         backgroundColor: style.backgroundColor || globalStyles.primaryColor,
@@ -746,7 +807,7 @@ function CustomSection({
   const content = (c.content as string) || "";
 
   return (
-    <section style={style}>
+    <section id={section.id} style={style}>
       <div className="mx-auto max-w-4xl">
         {heading && (
           <h2 className="text-3xl font-bold text-center mb-6">{heading}</h2>

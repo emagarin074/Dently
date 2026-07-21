@@ -17,6 +17,7 @@ import {
   HelpCircle,
   Phone,
   Megaphone,
+  LayoutTemplate,
   Code,
 } from "lucide-react";
 
@@ -31,21 +32,23 @@ const SECTION_ICONS: Record<SectionType, typeof Image> = {
   faq: HelpCircle,
   contact: Phone,
   cta: Megaphone,
-  custom: Code,
+  custom: LayoutTemplate,
+  modern_data: LayoutTemplate,
 };
 
 const SECTION_LABELS: Record<SectionType, string> = {
   hero: "Hero Banner",
-  services: "Services",
-  team: "Team",
+  services: "Services List",
+  team: "Our Team",
   booking: "Booking Form",
   about: "About Us",
   testimonials: "Testimonials",
-  gallery: "Gallery",
+  gallery: "Photo Gallery",
   faq: "FAQ",
-  contact: "Contact",
+  contact: "Contact Info",
   cta: "Call to Action",
   custom: "Custom Section",
+  modern_data: "Modern Template Data",
 };
 
 interface Props {

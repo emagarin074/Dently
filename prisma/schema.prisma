@@ -34,6 +34,8 @@ model Clinic {
   reports        Report[]
   queueEntries   QueueEntry[]
   websitePage    WebsitePage?
+  installmentPlans InstallmentPlan[]
+  inquiries      Inquiry[]
 
   @@index([slug])
 }
@@ -142,6 +144,7 @@ model Patient {
   patientNotes        PatientNote[]
   documents           PatientDocument[]
   followUps           FollowUp[]
+  installmentPlans    InstallmentPlan[]
 
   @@index([clinicId])
   @@index([clinicId, lastName])
@@ -329,8 +332,10 @@ model Procedure {
   requireXray          Boolean @default(false)
   requireLabDocs       Boolean @default(false)
 
+  isInstallmentAvailable Boolean @default(false)
   consentTemplateId    String?
   consentTemplate      DocumentTemplate? @relation(fields: [consentTemplateId], references: [id])
+  priceRules           Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -405,6 +410,7 @@ model Billing {
   updatedAt     DateTime      @updatedAt
 
   payments Payment[]
+  installmentPlan InstallmentPlan?
 
   @@index([clinicId])
   @@index([clinicId, status])
@@ -550,4 +556,58 @@ model WebsitePage {
   isPublished Boolean @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+enum InstallmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model InstallmentPlan {
+  id              String             @id @default(cuid())
+  clinicId        String
+  clinic          Clinic             @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  billingId       String?            @unique
+  billing         Billing?           @relation(fields: [billingId], references: [id], onDelete: SetNull)
+  totalAmount     Decimal            @db.Decimal(10, 2)
+  paidAmount      Decimal            @db.Decimal(10, 2) @default(0)
+  status          InstallmentStatus  @default(ACTIVE)
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  installments    InstallmentPayment[]
+
+  @@index([clinicId])
+  @@index([patientId])
+}
+
+model InstallmentPayment {
+  id                String          @id @default(cuid())
+  installmentPlanId String
+  installmentPlan   InstallmentPlan @relation(fields: [installmentPlanId], references: [id], onDelete: Cascade)
+  amount            Decimal         @db.Decimal(10, 2)
+  method            PaymentMethod   @default(CASH)
+  reference         String?
+  notes             String?
+  paidAt            DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+
+  @@index([installmentPlanId])
+}
+
+model Inquiry {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name      String
+  email     String?
+  phone     String?
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([clinicId])
 }

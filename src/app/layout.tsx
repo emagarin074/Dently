@@ -16,6 +16,9 @@ export const metadata: Metadata = {
     template: "%s | Dently",
   },
   description: "Modern multi-tenant SaaS platform for dental clinics",
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({

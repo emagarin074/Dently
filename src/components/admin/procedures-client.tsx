@@ -39,6 +39,7 @@ import {
   Search,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { TablePagination } from "@/components/ui/pagination";
 
 interface ConsentTemplate {
   id: string;
@@ -77,6 +78,19 @@ interface Procedure {
   requireLabDocs: boolean;
   consentTemplateId: string | null;
   consentTemplate: { id: string; name: string } | null;
+  priceRules?: unknown;
+}
+
+interface PriceRules {
+  severityPrices?: {
+    MILD?: number;
+    MODERATE?: number;
+    SEVERE?: number;
+  };
+  materialPrices?: Array<{ name: string; surcharge: number }>;
+  shadePrices?: Array<{ name: string; surcharge: number }>;
+  toothSurfaceSurcharge?: number;
+  doubleArchSurcharge?: number;
 }
 
 const toggleFields = [
@@ -113,6 +127,12 @@ const toggleFields = [
       { key: "requirePhoto", label: "Photo" },
       { key: "requireXray", label: "X-Ray" },
       { key: "requireLabDocs", label: "Laboratory Documents" },
+    ],
+  },
+  {
+    group: "Payment Options",
+    fields: [
+      { key: "isInstallmentAvailable", label: "Available for Installment" },
     ],
   },
 ];
@@ -207,6 +227,25 @@ function ProcedureForm({
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
+  const initialRules = (procedure?.priceRules as PriceRules | null) || {};
+  const [severityPrices, setSeverityPrices] = useState({
+    MILD: initialRules.severityPrices?.MILD ?? 0,
+    MODERATE: initialRules.severityPrices?.MODERATE ?? 0,
+    SEVERE: initialRules.severityPrices?.SEVERE ?? 0,
+  });
+  const [materialPrices, setMaterialPrices] = useState<
+    Array<{ name: string; surcharge: number }>
+  >(initialRules.materialPrices ?? []);
+  const [shadePrices, setShadePrices] = useState<
+    Array<{ name: string; surcharge: number }>
+  >(initialRules.shadePrices ?? []);
+  const [toothSurfaceSurcharge, setToothSurfaceSurcharge] = useState<number>(
+    initialRules.toothSurfaceSurcharge ?? 0,
+  );
+  const [doubleArchSurcharge, setDoubleArchSurcharge] = useState<number>(
+    initialRules.doubleArchSurcharge ?? 0,
+  );
+
   const requiresConsent = toggles["requireSignedConsent"];
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -232,6 +271,15 @@ function ProcedureForm({
     fd.set("priceType", priceType);
     fd.set("consentTemplateId", consentTemplateId);
     fd.set("category", category);
+
+    const finalRules = {
+      severityPrices,
+      materialPrices,
+      shadePrices,
+      toothSurfaceSurcharge,
+      doubleArchSurcharge,
+    };
+    fd.set("priceRules", JSON.stringify(finalRules));
 
     const result = procedure
       ? await updateProcedure(clinicSlug, procedure.id, fd)
@@ -394,6 +442,243 @@ function ProcedureForm({
             ))}
           </div>
 
+          {/* Surcharge configurations — shown when corresponding toggles are ON */}
+          {group.group === "Components" && (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t pt-4">
+              {toggles.hasToothSurface && (
+                <div className="space-y-1.5 p-3 bg-white border border-slate-200/60 rounded-xl">
+                  <Label className="text-xs font-bold text-slate-700">
+                    Tooth Surface Surcharge (Rule A) (₱) *
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Surcharge per surface (e.g. 200)"
+                    value={toothSurfaceSurcharge || ""}
+                    onChange={(e) =>
+                      setToothSurfaceSurcharge(Number(e.target.value))
+                    }
+                    className="h-9 text-xs"
+                  />
+                </div>
+              )}
+              {toggles.hasUpperLower && (
+                <div className="space-y-1.5 p-3 bg-white border border-slate-200/60 rounded-xl">
+                  <Label className="text-xs font-bold text-slate-700">
+                    Flat Double-Arch Surcharge (₱) *
+                  </Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="Surcharge when 'Both' is selected (e.g. 1200)"
+                    value={doubleArchSurcharge || ""}
+                    onChange={(e) =>
+                      setDoubleArchSurcharge(Number(e.target.value))
+                    }
+                    className="h-9 text-xs"
+                  />
+                </div>
+              )}
+              {toggles.hasSeverity && (
+                <div className="space-y-2 p-3 bg-white border border-slate-200/60 rounded-xl col-span-2">
+                  <Label className="text-xs font-bold text-slate-700">
+                    Severity Surcharges (₱)
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-semibold">
+                        Moderate Surcharge
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={severityPrices.MODERATE || ""}
+                        onChange={(e) =>
+                          setSeverityPrices((prev) => ({
+                            ...prev,
+                            MODERATE: Number(e.target.value),
+                          }))
+                        }
+                        placeholder="e.g. 500"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-[10px] text-slate-500 font-semibold">
+                        Severe Surcharge
+                      </Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={severityPrices.SEVERE || ""}
+                        onChange={(e) =>
+                          setSeverityPrices((prev) => ({
+                            ...prev,
+                            SEVERE: Number(e.target.value),
+                          }))
+                        }
+                        placeholder="e.g. 1000"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+              {toggles.hasMaterial && (
+                <div className="space-y-2.5 p-3 bg-white border border-slate-200/60 rounded-xl col-span-2">
+                  <Label className="text-xs font-bold text-slate-700">
+                    Material Options & Surcharges
+                  </Label>
+                  <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
+                    {materialPrices.length === 0 ? (
+                      <p className="text-[10px] text-slate-400">
+                        No custom material options added yet.
+                      </p>
+                    ) : (
+                      materialPrices.map((m, i) => (
+                        <div
+                          key={i}
+                          className="flex justify-between items-center text-xs p-1 bg-slate-50 border border-slate-200/60 rounded-md"
+                        >
+                          <span>
+                            {m.name} (+{formatCurrency(m.surcharge)})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMaterialPrices((prev) =>
+                                prev.filter((_, idx) => idx !== i),
+                              )
+                            }
+                            className="text-[10px] text-red-500 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="new-material-name"
+                      placeholder="Material (e.g. Zirconia)"
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Input
+                      id="new-material-surcharge"
+                      type="number"
+                      min="0"
+                      placeholder="Surcharge"
+                      className="h-8 text-xs w-20"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        const nameEl = document.getElementById(
+                          "new-material-name",
+                        ) as HTMLInputElement;
+                        const surchargeEl = document.getElementById(
+                          "new-material-surcharge",
+                        ) as HTMLInputElement;
+                        if (nameEl && surchargeEl && nameEl.value.trim()) {
+                          setMaterialPrices((prev) => [
+                            ...prev,
+                            {
+                              name: nameEl.value.trim(),
+                              surcharge: Number(surchargeEl.value) || 0,
+                            },
+                          ]);
+                          nameEl.value = "";
+                          surchargeEl.value = "";
+                        }
+                      }}
+                      className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white font-bold"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+              {toggles.hasShade && (
+                <div className="space-y-2.5 p-3 bg-white border border-slate-200/60 rounded-xl col-span-2">
+                  <Label className="text-xs font-bold text-slate-700">
+                    Shade Options & Surcharges (Optional)
+                  </Label>
+                  <div className="space-y-1.5 max-h-[120px] overflow-y-auto pr-1">
+                    {shadePrices.length === 0 ? (
+                      <p className="text-[10px] text-slate-400">
+                        No custom shade options added yet.
+                      </p>
+                    ) : (
+                      shadePrices.map((s, i) => (
+                        <div
+                          key={i}
+                          className="flex justify-between items-center text-xs p-1 bg-slate-50 border border-slate-200/60 rounded-md"
+                        >
+                          <span>
+                            {s.name} (+{formatCurrency(s.surcharge)})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setShadePrices((prev) =>
+                                prev.filter((_, idx) => idx !== i),
+                              )
+                            }
+                            className="text-[10px] text-red-500 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="new-shade-name"
+                      placeholder="Shade (e.g. Bleach)"
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Input
+                      id="new-shade-surcharge"
+                      type="number"
+                      min="0"
+                      placeholder="Surcharge"
+                      className="h-8 text-xs w-20"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        const nameEl = document.getElementById(
+                          "new-shade-name",
+                        ) as HTMLInputElement;
+                        const surchargeEl = document.getElementById(
+                          "new-shade-surcharge",
+                        ) as HTMLInputElement;
+                        if (nameEl && surchargeEl && nameEl.value.trim()) {
+                          setShadePrices((prev) => [
+                            ...prev,
+                            {
+                              name: nameEl.value.trim(),
+                              surcharge: Number(surchargeEl.value) || 0,
+                            },
+                          ]);
+                          nameEl.value = "";
+                          surchargeEl.value = "";
+                        }
+                      }}
+                      className="h-8 text-xs bg-slate-800 hover:bg-slate-900 text-white font-bold"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Consent template selector — shown when requireSignedConsent is on */}
           {group.group === "Required Uploads" && requiresConsent && (
             <div className="mt-3 space-y-2 rounded-xl border border-amber-200 bg-amber-50/80 p-3.5">
@@ -491,10 +776,14 @@ export function ProceduresClient({
   procedures,
   consentTemplates,
   clinicSlug,
+  total,
+  page,
 }: {
   procedures: Procedure[];
   consentTemplates: ConsentTemplate[];
   clinicSlug: string;
+  total: number;
+  page: number;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Procedure | null>(null);
@@ -706,6 +995,8 @@ export function ProceduresClient({
           </Card>
         ))}
       </div>
+
+      <TablePagination total={total} page={page} itemName="procedures" />
     </div>
   );
 }
