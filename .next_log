@@ -1,0 +1,19 @@
+
+> dently@0.1.0 dev
+> next dev
+
+⚠ Port 3000 is in use by process 10175, using available port 3001 instead.
+▲ Next.js 16.2.9 (Turbopack)
+- Local:         http://localhost:3001
+- Network:       http://192.168.1.58:3001
+- Environments: .env
+✓ Ready in 313ms
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          10175
+- Dir:          /Users/emmanagarin/Documents/Dently
+- Log:          .next/dev/logs/next-development.log
+
+Run kill 10175 to stop it.
+[?25h
