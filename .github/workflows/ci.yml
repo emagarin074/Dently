@@ -21,7 +21,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci --prefer-offline
+        run: npm ci --prefer-offline --legacy-peer-deps
 
       - name: Run ESLint
         run: npm run lint
@@ -40,7 +40,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci --prefer-offline
+        run: npm ci --prefer-offline --legacy-peer-deps
 
       - name: Run Vitest
         run: npx vitest run
