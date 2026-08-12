@@ -16,7 +16,16 @@ import {
 import { createPublicBooking } from "@/app/actions/appointments";
 import { toast } from "sonner";
 import { MapPin, Phone, Mail, Clock, CheckCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+
+import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
+
+export interface BlockedDate {
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  title: string;
+}
 
 export interface ClinicData {
   id: string;
@@ -39,18 +48,55 @@ export interface ClinicData {
   }[];
 }
 
-export function ClinicPublicPage({ clinic }: { clinic: ClinicData }) {
+export function ClinicPublicPage({
+  clinic,
+  blockedDates = [],
+}: {
+  clinic: ClinicData;
+  blockedDates?: BlockedDate[];
+}) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [dentistId, setDentistId] = useState<string>("");
   const [service, setService] = useState<string>("");
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  const openDays = getOpenDays(clinic.settings?.operatingHours);
+
+  function checkDateValidity(dateStr: string): string | null {
+    if (!dateStr) return null;
+    if (!isDayOpen(dateStr, openDays)) {
+      const dayName = getDayName(new Date(dateStr + "T00:00:00").getDay());
+      return `The clinic is closed on ${dayName}s. Please choose an open operating day.`;
+    }
+    const blocked = isDateBlocked(dateStr);
+    if (blocked) {
+      return `This date is unavailable (${blocked.title}). Please choose another date.`;
+    }
+    return null;
+  }
+
+  function isDateBlocked(dateStr: string): BlockedDate | null {
+    if (!dateStr) return null;
+    return (
+      blockedDates.find(
+        (b) => dateStr >= b.startDate && dateStr <= b.endDate,
+      ) ?? null
+    );
+  }
 
   const brandColor = clinic.settings?.brandColor || "#0891b2";
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     const fd = new FormData(e.currentTarget);
+    const chosenDate = fd.get("preferredDate") as string;
+    const err = checkDateValidity(chosenDate);
+    if (err) {
+      setDateError(err);
+      return;
+    }
+    setLoading(true);
     fd.set(
       "preferredDentistId",
       dentistId === "no-preference" ? "" : dentistId,
@@ -220,7 +266,16 @@ export function ClinicPublicPage({ clinic }: { clinic: ClinicData }) {
                       type="date"
                       min={new Date().toISOString().split("T")[0]}
                       required
+                      onChange={(e) => {
+                        setDateError(checkDateValidity(e.target.value));
+                      }}
                     />
+                    {dateError && (
+                      <p className="flex items-center gap-1.5 text-xs text-red-600">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        {dateError}
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">

@@ -4,6 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 
+import { requireAuth } from "@/lib/auth";
+import {
+  sendClinicEmail,
+  inquiryReceivedEmail,
+  inquiryReplyEmail,
+} from "@/lib/email";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+
 const inquirySchema = z
   .object({
     name: z.string().min(1, "Name is required"),
@@ -21,8 +29,18 @@ const inquirySchema = z
   });
 
 export async function createInquiry(clinicSlug: string, formData: FormData) {
+  const ip = await getClientIp();
+  const rateCheck = checkRateLimit(`inquiry_${ip}_${clinicSlug}`, 5, 600000);
+  if (!rateCheck.success) {
+    const mins = Math.ceil(rateCheck.resetMs / 60000);
+    return {
+      error: `Too many inquiry attempts. Please wait ${mins} minute(s) before trying again.`,
+    };
+  }
+
   const clinic = await prisma.clinic.findUnique({
     where: { slug: clinicSlug, isActive: true },
+    include: { settings: true },
   });
 
   if (!clinic) return { error: "Clinic not found." };
@@ -48,10 +66,88 @@ export async function createInquiry(clinicSlug: string, formData: FormData) {
       },
     });
 
+    if (parsed.data.email) {
+      try {
+        await sendClinicEmail({
+          to: parsed.data.email,
+          subject: `Thank You for Contacting ${clinic.name}`,
+          html: inquiryReceivedEmail({
+            clinicName: clinic.name,
+            patientName: parsed.data.name,
+          }),
+          clinicSettings: clinic.settings,
+          clinicName: clinic.name,
+        });
+      } catch (emailErr) {
+        console.error("Failed to send inquiry receipt email:", emailErr);
+      }
+    }
+
     return { success: true };
   } catch (error) {
     console.error("Create inquiry error:", error);
     return { error: "Failed to send message. Please try again." };
+  }
+}
+
+export async function replyToInquiry(
+  clinicSlug: string,
+  inquiryId: string,
+  replyMessage: string,
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
+  if (!replyMessage || !replyMessage.trim()) {
+    return { error: "Reply message cannot be empty." };
+  }
+
+  try {
+    const inquiry = await prisma.inquiry.findUnique({
+      where: { id: inquiryId },
+      include: { clinic: { include: { settings: true } } },
+    });
+
+    if (!inquiry || inquiry.clinicId !== user.clinicId) {
+      return { error: "Inquiry not found." };
+    }
+
+    if (!inquiry.email) {
+      return { error: "This inquiry does not have a patient email address." };
+    }
+
+    const emailResult = await sendClinicEmail({
+      to: inquiry.email,
+      subject: `Response from ${inquiry.clinic.name}`,
+      html: inquiryReplyEmail({
+        clinicName: inquiry.clinic.name,
+        patientName: inquiry.name,
+        originalMessage: inquiry.message,
+        replyMessage: replyMessage.trim(),
+      }),
+      clinicSettings: inquiry.clinic.settings,
+      clinicName: inquiry.clinic.name,
+    });
+
+    if (!emailResult.success) {
+      return {
+        error:
+          emailResult.error ||
+          "Failed to send reply email. Please check your clinic SMTP settings.",
+      };
+    }
+
+    // Mark as read after successful reply
+    await prisma.inquiry.update({
+      where: { id: inquiryId },
+      data: { isRead: true },
+    });
+
+    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    return { success: true };
+  } catch (error) {
+    console.error("Reply to inquiry error:", error);
+    return { error: "Failed to send reply email." };
   }
 }
 

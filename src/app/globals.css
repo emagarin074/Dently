@@ -72,11 +72,48 @@ body {
 }
 
 @media print {
-  .no-print {
-    display: none !important;
+  @page {
+    size: letter portrait;
+    margin: 0.5in;
   }
-  .print-only {
-    display: block !important;
+
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #printable-document,
+  #printable-document * {
+    visibility: visible !important;
+  }
+
+  #printable-document {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 8.5in !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  .no-print,
+  button,
+  header,
+  nav,
+  aside,
+  [role="dialog"] header,
+  [role="dialog"] button,
+  [data-radix-portal] > div:first-child {
+    display: none !important;
+    visibility: hidden !important;
   }
 }
 

@@ -92,6 +92,19 @@ export default async function ClinicPage({ params }: Props) {
 
   if (!clinic) notFound();
 
+  // Fetch active calendar blocks for this clinic
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const calendarBlocks = await prisma.calendarBlock.findMany({
+    where: { clinicId: clinic.id, endDate: { gte: today } },
+    select: { startDate: true, endDate: true, title: true },
+  });
+  const blockedDates = calendarBlocks.map((b) => ({
+    startDate: b.startDate.toISOString().split("T")[0],
+    endDate: b.endDate.toISOString().split("T")[0],
+    title: b.title,
+  }));
+
   // Serialize Decimal fields
   const serializedClinic = {
     ...clinic,
@@ -112,7 +125,13 @@ export default async function ClinicPage({ params }: Props) {
 
     if (clinic.websitePage.templateId === "modern") {
       const data = sections[0]?.content || {};
-      return <ModernTemplate clinic={serializedClinic} data={data} />;
+      return (
+        <ModernTemplate
+          clinic={serializedClinic}
+          data={data}
+          blockedDates={blockedDates}
+        />
+      );
     }
 
     return (
@@ -129,10 +148,13 @@ export default async function ClinicPage({ params }: Props) {
         }}
         sections={sections}
         globalStyles={globalStyles}
+        blockedDates={blockedDates}
       />
     );
   }
 
   // Fallback: original public page
-  return <ClinicPublicPage clinic={serializedClinic} />;
+  return (
+    <ClinicPublicPage clinic={serializedClinic} blockedDates={blockedDates} />
+  );
 }

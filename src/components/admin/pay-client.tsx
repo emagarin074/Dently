@@ -18,7 +18,6 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -145,10 +144,114 @@ export function PayClient({ clinicSlug, billing }: Props) {
       (!activePlan || activePlan.status === "COMPLETED"),
   );
 
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    description: string;
+    details: Array<{ label: string; value: string }>;
+    onConfirm: () => Promise<void>;
+  } | null>(null);
+
   const [instAmount, setInstAmount] = useState("");
   const [instMethod, setInstMethod] = useState("CASH");
   const [instReference, setInstReference] = useState("");
   const [instNotes, setInstNotes] = useState("");
+  const [instFrequency, setInstFrequency] = useState<
+    "MONTHLY" | "BIWEEKLY" | "WEEKLY"
+  >("MONTHLY");
+  const [scheduleMode, setScheduleMode] = useState<"COUNT" | "MONTHLY_AMOUNT">(
+    "COUNT",
+  );
+  const [instCount, setInstCount] = useState("3");
+  const [monthlyPaymentAmount, setMonthlyPaymentAmount] = useState("");
+
+  function computeSchedulePreview(
+    remainingPlanBalance: number,
+    frequency: string,
+    count: number,
+    fixedPaymentAmount?: number,
+  ) {
+    if (remainingPlanBalance <= 0 || count <= 0) return [];
+    const items: Array<{ dueDate: string; amount: number }> = [];
+    const perItem = fixedPaymentAmount
+      ? Number(fixedPaymentAmount.toFixed(2))
+      : Number((remainingPlanBalance / count).toFixed(2));
+
+    const today = new Date();
+    for (let i = 1; i <= count; i++) {
+      const d = new Date(today);
+      if (frequency === "MONTHLY") {
+        d.setMonth(d.getMonth() + i);
+      } else if (frequency === "BIWEEKLY") {
+        d.setDate(d.getDate() + i * 14);
+      } else {
+        d.setDate(d.getDate() + i * 7);
+      }
+      const coveredBefore = perItem * (i - 1);
+      const remainingForItem = Number(
+        (remainingPlanBalance - coveredBefore).toFixed(2),
+      );
+      const amt = fixedPaymentAmount
+        ? Math.min(perItem, remainingForItem)
+        : i === count
+          ? Number((remainingPlanBalance - perItem * (count - 1)).toFixed(2))
+          : perItem;
+      if (amt <= 0) break;
+      items.push({
+        dueDate: d.toISOString().split("T")[0],
+        amount: Number(amt.toFixed(2)),
+      });
+    }
+    return items;
+  }
+
+  function getSchedulePreview(remainingPlanBalance: number) {
+    if (scheduleMode === "MONTHLY_AMOUNT") {
+      const monthlyAmount = parseFloat(monthlyPaymentAmount);
+      if (isNaN(monthlyAmount) || monthlyAmount <= 0) return [];
+      const months = Math.ceil(remainingPlanBalance / monthlyAmount);
+      return computeSchedulePreview(
+        remainingPlanBalance,
+        "MONTHLY",
+        months,
+        monthlyAmount,
+      );
+    }
+
+    const count = parseInt(instCount, 10);
+    if (isNaN(count) || count <= 0) return [];
+    return computeSchedulePreview(remainingPlanBalance, instFrequency, count);
+  }
+
+  function getScheduleValidationError(remainingPlanBalance: number) {
+    if (remainingPlanBalance <= 0) return null;
+
+    if (scheduleMode === "MONTHLY_AMOUNT") {
+      const monthlyAmount = parseFloat(monthlyPaymentAmount);
+      if (isNaN(monthlyAmount) || monthlyAmount <= 0) {
+        return "Enter a valid monthly payment amount.";
+      }
+      return null;
+    }
+
+    const count = parseInt(instCount, 10);
+    if (isNaN(count) || count <= 0) {
+      return "Enter a valid number of installments.";
+    }
+    return null;
+  }
+
+  function getScheduleBasisLabel(remainingPlanBalance: number) {
+    if (scheduleMode === "MONTHLY_AMOUNT") {
+      const monthlyAmount = parseFloat(monthlyPaymentAmount);
+      if (isNaN(monthlyAmount) || monthlyAmount <= 0)
+        return "Monthly payment amount";
+      const months = Math.ceil(remainingPlanBalance / monthlyAmount);
+      return `${formatCurrency(monthlyAmount)} per month for ${months} month${months === 1 ? "" : "s"}`;
+    }
+
+    const count = parseInt(instCount, 10);
+    return `${Number.isNaN(count) ? 0 : count} installment${count === 1 ? "" : "s"} (${instFrequency.toLowerCase()})`;
+  }
 
   const isInstallmentAllowed =
     !!activePlan ||
@@ -164,33 +267,52 @@ export function PayClient({ clinicSlug, billing }: Props) {
     .filter((p) => !p.procedure.isInstallmentAvailable)
     .reduce((sum, p) => sum + Number(p.price), 0);
 
-  async function handleRecordPayment(e: React.FormEvent) {
+  const patientName = billing.appointment.patient
+    ? `${billing.appointment.patient.firstName} ${billing.appointment.patient.lastName}`
+    : "Anonymous Patient";
+
+  function handleRecordPayment(e: React.FormEvent) {
     e.preventDefault();
     // One-time payment is always the full remaining balance — no partial allowed
     const payVal = balance;
     if (payVal <= 0) return toast.error("No outstanding balance to pay");
 
-    setLoading(true);
-    const result = await recordPayment(
-      clinicSlug,
-      billing.id,
-      payVal,
-      method,
-      reference,
-      payNotes,
-    );
-    setLoading(false);
+    setConfirmModal({
+      title: "Review & Confirm One-Time Payment",
+      description:
+        "Please review the payment details before completing this transaction.",
+      details: [
+        { label: "Patient Name", value: patientName },
+        { label: "Payment Type", value: "One-time Payment" },
+        { label: "Amount to Collect", value: formatCurrency(payVal) },
+        { label: "Payment Method", value: method },
+        { label: "Reference / Receipt No.", value: reference || "N/A" },
+        { label: "Notes / Remarks", value: payNotes || "None" },
+      ],
+      onConfirm: async () => {
+        setLoading(true);
+        const result = await recordPayment(
+          clinicSlug,
+          billing.id,
+          payVal,
+          method,
+          reference,
+          payNotes,
+        );
+        setLoading(false);
 
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      toast.success("Payment recorded successfully");
-      setShowSuccessModal(true);
-      router.refresh();
-    }
+        if ("error" in result) {
+          toast.error(result.error);
+        } else {
+          toast.success("Payment recorded successfully");
+          setShowSuccessModal(true);
+          router.refresh();
+        }
+      },
+    });
   }
 
-  async function handleRecordInstPayment(e: React.FormEvent) {
+  function handleRecordInstPayment(e: React.FormEvent) {
     e.preventDefault();
     if (!activePlan) return toast.error("No active installment plan found");
 
@@ -201,46 +323,83 @@ export function PayClient({ clinicSlug, billing }: Props) {
     if (amt > planBalance)
       return toast.error("Payment cannot exceed remaining plan balance");
 
-    setLoading(true);
+    const totalCollected = (balance > 0 ? balance : 0) + amt;
 
-    // If there is an outstanding balance for the current visit, record it first
+    const details: Array<{ label: string; value: string }> = [
+      { label: "Patient Name", value: patientName },
+      { label: "Payment Type", value: "Installment Payment" },
+      { label: "Installment Amount", value: formatCurrency(amt) },
+    ];
+
     if (balance > 0) {
-      const standardResult = await recordPayment(
-        clinicSlug,
-        billing.id,
-        balance,
-        instMethod,
-        instReference,
-        instNotes,
+      details.push(
+        { label: "Today's One-Time Balance", value: formatCurrency(balance) },
+        {
+          label: "Total Cash Collected",
+          value: formatCurrency(totalCollected),
+        },
       );
-      if ("error" in standardResult) {
+    }
+
+    details.push(
+      { label: "Payment Method", value: instMethod },
+      { label: "Reference / Receipt No.", value: instReference || "N/A" },
+      { label: "Notes / Remarks", value: instNotes || "None" },
+    );
+
+    setConfirmModal({
+      title: "Review & Confirm Installment Payment",
+      description:
+        "Please review the installment payment summary before completing this transaction.",
+      details,
+      onConfirm: async () => {
+        setLoading(true);
+
+        // If there is an outstanding balance for the current visit, record it first
+        if (balance > 0) {
+          const standardResult = await recordPayment(
+            clinicSlug,
+            billing.id,
+            balance,
+            instMethod,
+            instReference,
+            instNotes,
+          );
+          if ("error" in standardResult) {
+            setLoading(false);
+            toast.error(standardResult.error);
+            return;
+          }
+        }
+
+        const result = await recordInstallmentPayment(
+          clinicSlug,
+          activePlan.id,
+          {
+            amount: amt,
+            method: instMethod,
+            reference: instReference,
+            notes: instNotes,
+            currentAppointmentId: billing.appointment.id,
+          },
+        );
         setLoading(false);
-        return toast.error(standardResult.error);
-      }
-    }
 
-    const result = await recordInstallmentPayment(clinicSlug, activePlan.id, {
-      amount: amt,
-      method: instMethod,
-      reference: instReference,
-      notes: instNotes,
-      currentAppointmentId: billing.appointment.id,
+        if ("error" in result) {
+          toast.error(result.error);
+        } else {
+          toast.success("Installment payment recorded successfully");
+          setInstAmount("");
+          setInstReference("");
+          setInstNotes("");
+          setShowSuccessModal(true);
+          router.refresh();
+        }
+      },
     });
-    setLoading(false);
-
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      toast.success("Installment payment recorded successfully");
-      setInstAmount("");
-      setInstReference("");
-      setInstNotes("");
-      setShowSuccessModal(true);
-      router.refresh();
-    }
   }
 
-  async function handleCreatePlanWithDownpayment(e: React.FormEvent) {
+  function handleCreatePlanWithDownpayment(e: React.FormEvent) {
     e.preventDefault();
     if (!billing.appointment.patient?.id)
       return toast.error("Patient profile not found");
@@ -263,51 +422,101 @@ export function PayClient({ clinicSlug, billing }: Props) {
       );
     }
 
-    setLoading(true);
+    const remainingPlanBal = Math.max(0, planTotal - actualDownpayment);
+    const scheduleError = getScheduleValidationError(remainingPlanBal);
+    if (scheduleError) return toast.error(scheduleError);
+    const scheduleItems = getSchedulePreview(remainingPlanBal);
 
-    // 1. Process one-time payment part if exists
-    if (oneTimeTotal > 0) {
-      const standardResult = await recordPayment(
-        clinicSlug,
-        billing.id,
-        oneTimeTotal,
-        instMethod,
-        instReference,
-        "Combined one-time treatment payment",
-      );
-      if ("error" in standardResult) {
-        setLoading(false);
-        return toast.error(standardResult.error);
-      }
-    }
-
-    // 2. Process installment plan creation
-    const result = await createInstallmentPlanWithDownpayment(
-      clinicSlug,
-      billing.appointment.patient.id,
+    const details: Array<{ label: string; value: string }> = [
+      { label: "Patient Name", value: patientName },
+      { label: "Payment Type", value: "Installment Plan Creation" },
+      { label: "Installment Plan Total", value: formatCurrency(planTotal) },
+      { label: "Total Amount Collected", value: formatCurrency(inputPayment) },
       {
-        totalAmount: planTotal,
-        billingId: billing.id,
-        downpayment: actualDownpayment,
-        method: instMethod,
-        reference: instReference,
-        notes: planNotes,
+        label: "Downpayment Applied to Plan",
+        value: formatCurrency(actualDownpayment),
       },
-    );
-    setLoading(false);
+      {
+        label: "Balance Used for Monthly Dues",
+        value: formatCurrency(remainingPlanBal),
+      },
+      {
+        label: "Schedule Basis",
+        value: getScheduleBasisLabel(remainingPlanBal),
+      },
+      {
+        label: "Payment Duration",
+        value: `${scheduleItems.length} payment${scheduleItems.length === 1 ? "" : "s"}`,
+      },
+    ];
 
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      toast.success("Installment plan created and downpayment recorded!");
-      setShowSuccessModal(true);
-      router.refresh();
+    if (oneTimeTotal > 0) {
+      details.push(
+        { label: "One-Time Treatments", value: formatCurrency(oneTimeTotal) },
+        {
+          label: "Actual Plan Downpayment",
+          value: formatCurrency(actualDownpayment),
+        },
+      );
     }
-  }
 
-  const patientName = billing.appointment.patient
-    ? `${billing.appointment.patient.firstName} ${billing.appointment.patient.lastName}`
-    : "Anonymous Patient";
+    details.push(
+      { label: "Payment Method", value: instMethod },
+      { label: "Reference / Receipt No.", value: instReference || "N/A" },
+      { label: "Plan Notes", value: planNotes || "None" },
+    );
+
+    setConfirmModal({
+      title: "Review & Confirm Installment Plan",
+      description:
+        "Please review the installment plan details and downpayment before creating the plan.",
+      details,
+      onConfirm: async () => {
+        setLoading(true);
+
+        // 1. Process one-time payment part if exists
+        if (oneTimeTotal > 0) {
+          const standardResult = await recordPayment(
+            clinicSlug,
+            billing.id,
+            oneTimeTotal,
+            instMethod,
+            instReference,
+            "Combined one-time treatment payment",
+          );
+          if ("error" in standardResult) {
+            setLoading(false);
+            toast.error(standardResult.error);
+            return;
+          }
+        }
+
+        // 2. Process installment plan creation
+        const result = await createInstallmentPlanWithDownpayment(
+          clinicSlug,
+          billing.appointment.patient!.id,
+          {
+            totalAmount: planTotal,
+            billingId: billing.id,
+            downpayment: actualDownpayment,
+            method: instMethod,
+            reference: instReference,
+            notes: planNotes,
+            scheduleItems,
+          },
+        );
+        setLoading(false);
+
+        if ("error" in result) {
+          toast.error(result.error);
+        } else {
+          toast.success("Installment plan created and downpayment recorded!");
+          setShowSuccessModal(true);
+          router.refresh();
+        }
+      },
+    });
+  }
 
   const progressPercent = activePlan
     ? Math.min(
@@ -853,6 +1062,185 @@ export function PayClient({ clinicSlug, billing }: Props) {
                             />
                           </div>
 
+                          {/* Installment Due Date Schedule Generator */}
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                            <Label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                              <Landmark className="w-3.5 h-3.5 text-indigo-600" />
+                              Installment Schedule Generator
+                            </Label>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-1">
+                                <Label className="text-[11px] font-medium text-slate-600">
+                                  Schedule Basis
+                                </Label>
+                                <Select
+                                  value={scheduleMode}
+                                  onValueChange={(
+                                    val: "COUNT" | "MONTHLY_AMOUNT",
+                                  ) => setScheduleMode(val)}
+                                >
+                                  <SelectTrigger className="rounded-lg border-slate-200 h-8 text-xs bg-white">
+                                    <SelectValue placeholder="Basis" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="COUNT">
+                                      Number of Payments
+                                    </SelectItem>
+                                    <SelectItem value="MONTHLY_AMOUNT">
+                                      Monthly Amount
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+
+                              <div className="space-y-1">
+                                <Label className="text-[11px] font-medium text-slate-600">
+                                  Payment Frequency
+                                </Label>
+                                <Select
+                                  value={instFrequency}
+                                  onValueChange={(
+                                    val: "MONTHLY" | "BIWEEKLY" | "WEEKLY",
+                                  ) => setInstFrequency(val)}
+                                  disabled={scheduleMode === "MONTHLY_AMOUNT"}
+                                >
+                                  <SelectTrigger className="rounded-lg border-slate-200 h-8 text-xs bg-white">
+                                    <SelectValue placeholder="Frequency" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="MONTHLY">
+                                      Monthly
+                                    </SelectItem>
+                                    <SelectItem value="BIWEEKLY">
+                                      Bi-Weekly (14 days)
+                                    </SelectItem>
+                                    <SelectItem value="WEEKLY">
+                                      Weekly
+                                    </SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+
+                            {scheduleMode === "COUNT" ? (
+                              <div className="space-y-1">
+                                <Label className="text-[11px] font-medium text-slate-600">
+                                  Number of Installments
+                                </Label>
+                                <Input
+                                  type="number"
+                                  min="1"
+                                  step="1"
+                                  value={instCount}
+                                  onChange={(e) => setInstCount(e.target.value)}
+                                  placeholder="Enter number of payments"
+                                  className="rounded-lg border-slate-200 h-8 text-xs bg-white"
+                                />
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <Label className="text-[11px] font-medium text-slate-600">
+                                  Target Monthly Payment (₱)
+                                </Label>
+                                <Input
+                                  type="number"
+                                  min="0.01"
+                                  step="0.01"
+                                  value={monthlyPaymentAmount}
+                                  onChange={(e) =>
+                                    setMonthlyPaymentAmount(e.target.value)
+                                  }
+                                  placeholder="Enter monthly amount"
+                                  className="rounded-lg border-slate-200 h-8 text-xs bg-white"
+                                />
+                              </div>
+                            )}
+
+                            {/* Schedule Items Preview */}
+                            {(() => {
+                              const inputPayment = parseFloat(downpayment) || 0;
+                              const actualDP = Math.max(
+                                0,
+                                inputPayment - oneTimeTotal,
+                              );
+                              const remainingPlanBal = Math.max(
+                                0,
+                                planTotal - actualDP,
+                              );
+                              const items =
+                                getSchedulePreview(remainingPlanBal);
+
+                              return (
+                                <div className="space-y-1.5 pt-1">
+                                  <div className="grid grid-cols-3 gap-2 rounded-lg border border-slate-200 bg-white p-2 text-[11px]">
+                                    <div>
+                                      <span className="block text-slate-500">
+                                        Plan Total
+                                      </span>
+                                      <span className="font-bold text-slate-900">
+                                        {formatCurrency(planTotal)}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-slate-500">
+                                        Less Downpayment
+                                      </span>
+                                      <span className="font-bold text-emerald-700">
+                                        {formatCurrency(actualDP)}
+                                      </span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-slate-500">
+                                        Monthly Due Basis
+                                      </span>
+                                      <span className="font-bold text-indigo-700">
+                                        {formatCurrency(remainingPlanBal)}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {items.length === 0 ? null : (
+                                    <>
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
+                                        Generated Schedule Preview (
+                                        {items.length} Payments)
+                                      </span>
+                                      {scheduleMode === "MONTHLY_AMOUNT" && (
+                                        <p className="text-[10px] text-slate-500">
+                                          Full payment will take {items.length}{" "}
+                                          month{items.length === 1 ? "" : "s"}.
+                                          The final payment is adjusted if the
+                                          balance does not divide evenly.
+                                        </p>
+                                      )}
+                                      <div className="divide-y divide-slate-100 bg-white border border-slate-200 rounded-lg text-xs overflow-hidden">
+                                        {items.map((item, idx) => (
+                                          <div
+                                            key={idx}
+                                            className="p-2 flex items-center justify-between"
+                                          >
+                                            <span className="font-medium text-slate-700">
+                                              Installment #{idx + 1}
+                                            </span>
+                                            <div className="flex items-center gap-3">
+                                              <span className="text-slate-500 text-[11px]">
+                                                Due: {item.dueDate}
+                                              </span>
+                                              <span className="font-bold text-slate-900">
+                                                {formatCurrency(item.amount)}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+
                           <div className="space-y-2">
                             <Label className="text-xs font-bold text-slate-700">
                               Plan Notes / Installment Agreements
@@ -1033,6 +1421,72 @@ export function PayClient({ clinicSlug, billing }: Props) {
           </Card>
         </div>
       </div>
+
+      {/* Payment Confirmation Review Dialog */}
+      <Dialog
+        open={!!confirmModal}
+        onOpenChange={(open) => {
+          if (!open && !loading) setConfirmModal(null);
+        }}
+      >
+        <DialogContent className="max-w-md bg-white rounded-2xl border-slate-100 p-0 overflow-hidden shadow-2xl">
+          <DialogHeader className="bg-slate-50/50 border-b border-slate-100 p-5">
+            <DialogTitle className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <DollarSign className="h-4 w-4 text-primary" />
+              {confirmModal?.title}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-slate-500 mt-1">
+              {confirmModal?.description}
+            </DialogDescription>
+          </DialogHeader>
+
+          {confirmModal && (
+            <div className="p-5 space-y-3">
+              <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 space-y-2 text-xs">
+                {confirmModal.details.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="flex justify-between items-center py-1.5 border-b border-slate-100 last:border-0"
+                  >
+                    <span className="text-slate-500 font-medium">
+                      {item.label}
+                    </span>
+                    <span className="font-bold text-slate-800 text-right">
+                      {item.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="p-4 bg-slate-50/50 border-t border-slate-100 flex justify-end gap-2">
+            <Button
+              variant="outline"
+              type="button"
+              onClick={() => setConfirmModal(null)}
+              disabled={loading}
+              className="rounded-xl text-xs h-9 px-4 border-slate-200"
+            >
+              Cancel & Edit
+            </Button>
+            <Button
+              type="button"
+              onClick={async () => {
+                if (confirmModal) {
+                  const action = confirmModal.onConfirm;
+                  await action();
+                  setConfirmModal(null);
+                }
+              }}
+              disabled={loading}
+              className="bg-primary hover:bg-primary/95 text-white font-bold rounded-xl text-xs h-9 px-5 shadow-sm"
+            >
+              {loading ? "Processing..." : "Confirm & Complete Payment"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Success Modal Overlay */}
       <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>

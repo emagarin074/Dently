@@ -54,6 +54,7 @@ export default async function BookingsPage({ params, searchParams }: Props) {
     procedures,
     dentists,
     patients,
+    blockedDates,
   ] = await Promise.all([
     // Tab 1 – pending booking requests (all future)
     prisma.appointment.findMany({
@@ -117,6 +118,12 @@ export default async function BookingsPage({ params, searchParams }: Props) {
       select: { id: true, firstName: true, lastName: true, phone: true },
       orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
     }),
+
+    // Blocked dates — for client-side validation in admin booking dialog
+    prisma.calendarBlock.findMany({
+      where: { clinicId: user.clinicId, endDate: { gte: today } },
+      select: { startDate: true, endDate: true, title: true },
+    }),
   ]);
 
   return (
@@ -139,6 +146,11 @@ export default async function BookingsPage({ params, searchParams }: Props) {
           clinicSlug={slug}
           userRole={user.role}
           defaultTab={tab ?? "requests"}
+          blockedDates={blockedDates.map((b) => ({
+            startDate: b.startDate.toISOString().split("T")[0],
+            endDate: b.endDate.toISOString().split("T")[0],
+            title: b.title,
+          }))}
         />
       </main>
     </>

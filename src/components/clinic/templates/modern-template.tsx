@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import Image from "next/image";
+import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
 import {
   Check,
   Phone,
@@ -44,10 +45,8 @@ import {
   FaUserDoctor,
   FaUserNurse,
 } from "react-icons/fa6";
-import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { ClinicData } from "@/components/clinic/public-page";
-import { formatCurrency } from "@/lib/utils";
 import {
   Accordion,
   AccordionContent,
@@ -67,10 +66,13 @@ import {
 import { toast } from "sonner";
 import { createPublicBooking } from "@/app/actions/appointments";
 import { createInquiry } from "@/app/actions/inquiries";
+import { type BlockedDate } from "@/components/clinic/public-page";
+import { AlertCircle } from "lucide-react";
 
 interface Props {
   clinic: ClinicData;
   data: Record<string, unknown>;
+  blockedDates?: BlockedDate[];
 }
 
 const PlatformIcon: Record<string, React.ElementType> = {
@@ -81,12 +83,37 @@ const PlatformIcon: Record<string, React.ElementType> = {
   YouTube: FaYoutube,
 };
 
-export function ModernTemplate({ clinic, data }: Props) {
+export function ModernTemplate({ clinic, data, blockedDates = [] }: Props) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [inquiryLoading, setInquiryLoading] = useState(false);
   const [dentistId, setDentistId] = useState<string>("");
   const [service, setService] = useState<string>("");
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  const openDays = getOpenDays(clinic.settings?.operatingHours);
+
+  function checkDateValidity(dateStr: string): string | null {
+    if (!dateStr) return null;
+    if (!isDayOpen(dateStr, openDays)) {
+      const dayName = getDayName(new Date(dateStr + "T00:00:00").getDay());
+      return `The clinic is closed on ${dayName}s. Please choose an open operating day.`;
+    }
+    const blocked = isDateBlocked(dateStr);
+    if (blocked) {
+      return `This date is unavailable (${blocked.title}). Please choose another date.`;
+    }
+    return null;
+  }
+
+  function isDateBlocked(dateStr: string): BlockedDate | null {
+    if (!dateStr) return null;
+    return (
+      blockedDates.find(
+        (b) => dateStr >= b.startDate && dateStr <= b.endDate,
+      ) ?? null
+    );
+  }
 
   const navLinks =
     (data.navLinks as { label: string; sectionId: string }[]) || [];
@@ -95,6 +122,10 @@ export function ModernTemplate({ clinic, data }: Props) {
   const mainHeading = (data.heroHeadingMain as string) || "A calmer";
   const highlightHeading =
     (data.heroHeadingHighlight as string) || "dental\nvisit starts here.";
+  const heroCtaText = (data.heroCtaText as string) || "Book an Appointment";
+  const heroCtaSection =
+    (data.heroCtaSection as string) ||
+    (heroCtaText.toLowerCase().includes("contact") ? "contact" : "booking");
 
   const services =
     (data.servicesItems as {
@@ -102,7 +133,6 @@ export function ModernTemplate({ clinic, data }: Props) {
       description: string;
       icon: string;
     }[]) || [];
-  const faqs = (data.faqItems as { q: string; a: string }[]) || [];
   const socialLinks =
     (data.socialLinks as { platform: string; url: string; label?: string }[]) ||
     [];
@@ -141,8 +171,14 @@ export function ModernTemplate({ clinic, data }: Props) {
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     const fd = new FormData(e.currentTarget);
+    const chosenDate = fd.get("preferredDate") as string;
+    const err = checkDateValidity(chosenDate);
+    if (err) {
+      setDateError(err);
+      return;
+    }
+    setLoading(true);
     fd.set(
       "preferredDentistId",
       dentistId === "no-preference" ? "" : dentistId,
@@ -279,12 +315,12 @@ export function ModernTemplate({ clinic, data }: Props) {
           {/* CTA & Avatars */}
           <div className="space-y-8">
             <a
-              href="#booking"
-              onClick={(e) => handleScroll(e, "booking")}
+              href={`#${heroCtaSection}`}
+              onClick={(e) => handleScroll(e, heroCtaSection)}
               className="inline-block"
             >
               <Button className="bg-blue-500 hover:bg-blue-600 text-white rounded-full px-8 py-6 text-lg font-medium shadow-md">
-                {(data.heroCtaText as string) || "Book an Appointment"}
+                {heroCtaText}
                 <ArrowRight className="w-5 h-5 ml-2" />
               </Button>
             </a>
@@ -758,7 +794,16 @@ export function ModernTemplate({ clinic, data }: Props) {
                       min={new Date().toISOString().split("T")[0]}
                       required
                       className="bg-slate-50 border-slate-200 h-14"
+                      onChange={(e) => {
+                        setDateError(checkDateValidity(e.target.value));
+                      }}
                     />
+                    {dateError && (
+                      <p className="flex items-center gap-1.5 text-xs text-red-500">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        {dateError}
+                      </p>
+                    )}
                   </div>
                 </div>
 

@@ -21,7 +21,11 @@ export default async function DocumentsPage({ params, searchParams }: Props) {
   const take = 20;
   const skip = (parseInt(page || "1") - 1) * take;
 
-  const [templates, recentDocs, documentsTotal] = await Promise.all([
+  const [clinic, templates, recentDocs, documentsTotal] = await Promise.all([
+    prisma.clinic.findUnique({
+      where: { id: user.clinicId },
+      select: { name: true, address: true, phone: true, email: true },
+    }),
     prisma.documentTemplate.findMany({
       where: { clinicId: user.clinicId },
       orderBy: { name: "asc" },
@@ -47,6 +51,7 @@ export default async function DocumentsPage({ params, searchParams }: Props) {
           page={parseInt(page || "1")}
           clinicSlug={slug}
           userRole={user.role}
+          clinicInfo={clinic ? JSON.parse(JSON.stringify(clinic)) : null}
         />
       </main>
     </>

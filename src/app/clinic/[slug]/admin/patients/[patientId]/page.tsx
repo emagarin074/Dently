@@ -33,7 +33,7 @@ export default async function PatientDetailPage({
       appointments: {
         include: {
           dentist: { select: { name: true } },
-          procedures: { include: { procedure: true } },
+          procedures: { include: { procedure: true, documents: true } },
           billing: { include: { payments: true } },
         },
         orderBy: { preferredDate: "desc" },
@@ -44,6 +44,7 @@ export default async function PatientDetailPage({
       installmentPlans: {
         include: {
           installments: { orderBy: { paidAt: "desc" } },
+          scheduleItems: { orderBy: { installmentNumber: "asc" } },
           billing: {
             include: {
               appointment: {

@@ -90,7 +90,13 @@ export function RescheduleDialog({
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
             <Label>New Date</Label>
-            <Input name="date" type="date" required defaultValue={dateString} />
+            <Input
+              name="date"
+              type="date"
+              required
+              min={new Date().toISOString().split("T")[0]}
+              defaultValue={dateString}
+            />
           </div>
           <div className="space-y-2">
             <Label>Time (optional)</Label>

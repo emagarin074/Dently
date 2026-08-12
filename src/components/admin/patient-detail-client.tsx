@@ -16,15 +16,16 @@ import {
 import {
   recordInstallmentPayment,
   cancelInstallmentPlan,
+  sendInstallmentReminder,
 } from "@/app/actions/installments";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import { toast } from "sonner";
 import { formatDate, formatCurrency, calculateAge } from "@/lib/utils";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -36,12 +37,69 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { UserRole } from "@prisma/client";
-import { Edit2, Save, Plus, CreditCard, Landmark } from "lucide-react";
+import {
+  Edit2,
+  Save,
+  Plus,
+  CreditCard,
+  Landmark,
+  Download,
+  Eye,
+  FileText,
+  Mail,
+  Loader2,
+  Calendar,
+} from "lucide-react";
 import {
   AddProcedureDialog,
   type ProcedureOption,
 } from "@/components/admin/add-procedure-dialog";
 import { TablePagination } from "@/components/ui/pagination";
+import { ImageAnnotatorDialog } from "@/components/admin/image-annotator";
+
+function InstallmentReminderButton({
+  clinicSlug,
+  scheduleItemId,
+  patientEmail,
+}: {
+  clinicSlug: string;
+  scheduleItemId: string;
+  patientEmail?: string | null;
+}) {
+  const [loading, setLoading] = useState(false);
+
+  async function handleSend() {
+    if (!patientEmail) {
+      toast.error("Patient does not have an email address on file.");
+      return;
+    }
+    setLoading(true);
+    const res = await sendInstallmentReminder(clinicSlug, scheduleItemId);
+    setLoading(false);
+    if ("error" in res && res.error) {
+      toast.error(res.error);
+    } else {
+      toast.success("Installment payment reminder email sent to patient!");
+    }
+  }
+
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={handleSend}
+      disabled={loading || !patientEmail}
+      className="h-7 px-2 text-[11px] font-semibold rounded-lg border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+    >
+      {loading ? (
+        <Loader2 className="w-3 h-3 animate-spin mr-1" />
+      ) : (
+        <Mail className="w-3 h-3 mr-1" />
+      )}
+      Send Reminder
+    </Button>
+  );
+}
 
 interface Patient {
   id: string;
@@ -148,6 +206,13 @@ export function PatientDetailClient({
   const [gender, setGender] = useState(patient.gender || "");
   const [loading, setLoading] = useState(false);
   const [noteText, setNoteText] = useState("");
+
+  // Annotator state
+  const [annotatorData, setAnnotatorData] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
+
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -160,6 +225,9 @@ export function PatientDetailClient({
 
   const billPage = parseInt(searchParams.get("billPage") || "1");
   const billPageSize = 10;
+
+  const docPage = parseInt(searchParams.get("docPage") || "1");
+  const docPageSize = 8;
 
   async function handleUpdatePatient(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -437,16 +505,17 @@ export function PatientDetailClient({
                     },
                   ].map((field) => (
                     <div key={field.name} className="flex items-center gap-2">
-                      <input type="hidden" name={field.name} value="false" />
                       <input
                         type="checkbox"
                         id={field.name}
                         name={field.name}
                         value="true"
                         defaultChecked={field.defaultChecked || false}
-                        className="rounded"
+                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer"
                       />
-                      <Label htmlFor={field.name}>{field.label}</Label>
+                      <Label htmlFor={field.name} className="cursor-pointer">
+                        {field.label}
+                      </Label>
                     </div>
                   ))}
                 </div>
@@ -575,7 +644,166 @@ export function PatientDetailClient({
         </TabsContent>
 
         {/* Billing */}
-        <TabsContent value="billing" className="mt-4">
+        <TabsContent value="billing" className="mt-4 space-y-4">
+          {/* Active Installment Plans & Due Schedules */}
+          {patient.installmentPlans && patient.installmentPlans.length > 0 && (
+            <Card className="border-indigo-100 bg-indigo-50/30">
+              <CardHeader className="py-3 px-4 border-b border-indigo-100 flex flex-row items-center justify-between">
+                <CardTitle className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-indigo-600" />
+                  Installment Plans & Due Schedules
+                </CardTitle>
+                <span className="text-xs text-indigo-700 font-semibold">
+                  {patient.installmentPlans.length} Active Plan(s)
+                </span>
+              </CardHeader>
+              <CardContent className="p-4 space-y-4">
+                {patient.installmentPlans.map((plan) => {
+                  const planTotal = Number(plan.totalAmount);
+                  const planPaid = Number(plan.paidAmount);
+                  const planBalance = Math.max(0, planTotal - planPaid);
+                  const scheduleItems =
+                    (
+                      plan as unknown as {
+                        scheduleItems?: Array<{
+                          id: string;
+                          installmentNumber: number;
+                          dueDate: string | Date;
+                          amount: number | string;
+                          status: string;
+                          reminderSent: boolean;
+                        }>;
+                      }
+                    ).scheduleItems || [];
+
+                  return (
+                    <div
+                      key={plan.id}
+                      className="bg-white border border-slate-200 rounded-xl p-4 space-y-3 shadow-2xs"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                        <div>
+                          <p className="text-xs font-bold text-slate-800">
+                            Installment Treatment Plan
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Notes: {plan.notes || "Standard Installment Scheme"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                              plan.status === "COMPLETED"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : plan.status === "CANCELLED"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {plan.status}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Summary Metrics */}
+                      <div className="grid grid-cols-3 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">
+                            Total Plan
+                          </span>
+                          <span className="font-bold text-slate-800">
+                            {formatCurrency(planTotal)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">
+                            Total Paid
+                          </span>
+                          <span className="font-bold text-emerald-600">
+                            {formatCurrency(planPaid)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-500 block">
+                            Remaining Balance
+                          </span>
+                          <span className="font-bold text-rose-600">
+                            {formatCurrency(planBalance)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Scheduled Due Dates List */}
+                      {scheduleItems.length > 0 && (
+                        <div className="space-y-2 pt-1">
+                          <p className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                            Scheduled Installment Due Dates
+                          </p>
+
+                          <div className="divide-y divide-slate-100 border border-slate-200/80 rounded-lg overflow-hidden bg-white">
+                            {scheduleItems.map((item) => {
+                              const itemDueDate = new Date(item.dueDate);
+                              const isPastDue =
+                                item.status !== "PAID" &&
+                                itemDueDate < new Date();
+                              const displayStatus = isPastDue
+                                ? "OVERDUE"
+                                : item.status;
+
+                              return (
+                                <div
+                                  key={item.id}
+                                  className="p-2.5 flex flex-wrap items-center justify-between gap-2 text-xs hover:bg-slate-50/60 transition-colors"
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-[10px] shrink-0">
+                                      #{item.installmentNumber}
+                                    </span>
+                                    <div>
+                                      <p className="font-semibold text-slate-800">
+                                        {formatCurrency(Number(item.amount))}
+                                      </p>
+                                      <p className="text-[10px] text-slate-500">
+                                        Due: {formatDate(item.dueDate)}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                        displayStatus === "PAID"
+                                          ? "bg-emerald-100 text-emerald-800"
+                                          : displayStatus === "OVERDUE"
+                                            ? "bg-rose-100 text-rose-800"
+                                            : "bg-amber-100 text-amber-800"
+                                      }`}
+                                    >
+                                      {displayStatus}
+                                    </span>
+
+                                    {displayStatus !== "PAID" && (
+                                      <InstallmentReminderButton
+                                        clinicSlug={clinicSlug}
+                                        scheduleItemId={item.id}
+                                        patientEmail={patient.email}
+                                      />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Billing History</CardTitle>
@@ -799,30 +1027,205 @@ export function PatientDetailClient({
               <CardTitle className="text-base">Documents</CardTitle>
             </CardHeader>
             <CardContent>
-              {patient.documents.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">
-                  No documents
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {patient.documents.map((d) => (
-                    <div
-                      key={d.id}
-                      className="flex items-center justify-between border rounded-lg p-3"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{d.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {d.type} · {formatDate(d.createdAt)}
-                        </p>
-                      </div>
+              {(() => {
+                interface DocRecord {
+                  id: string;
+                  title: string;
+                  type: string;
+                  createdAt: Date | string;
+                  fileUrl?: string | null;
+                  content?: string | null;
+                  mimeType?: string | null;
+                  notes?: string | null;
+                }
+                interface ApptRecord {
+                  preferredDate: Date | string;
+                  procedures?: {
+                    procedure: { name: string };
+                    documents?: DocRecord[];
+                  }[];
+                }
+                const allDocs = [
+                  ...(patient.documents || []).map((d: DocRecord) => ({
+                    ...d,
+                    source: "Patient Profile",
+                    reason: "General Document",
+                  })),
+                  ...(patient.appointments || []).flatMap((appt: ApptRecord) =>
+                    (appt.procedures || []).flatMap((proc) =>
+                      (proc.documents || []).map((d: DocRecord) => ({
+                        ...d,
+                        source: `Appointment on ${formatDate(appt.preferredDate)}`,
+                        reason: `Procedure: ${proc.procedure.name}`,
+                      })),
+                    ),
+                  ),
+                ].sort(
+                  (a, b) =>
+                    new Date(b.createdAt).getTime() -
+                    new Date(a.createdAt).getTime(),
+                );
+
+                const paginatedDocs = allDocs.slice(
+                  (docPage - 1) * docPageSize,
+                  docPage * docPageSize,
+                );
+
+                if (allDocs.length === 0) {
+                  return (
+                    <p className="text-sm text-muted-foreground py-4 text-center">
+                      No documents
+                    </p>
+                  );
+                }
+
+                return (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {paginatedDocs.map((d) => {
+                        const fileSource =
+                          d.fileUrl ||
+                          (d.content && d.mimeType
+                            ? `data:${d.mimeType};base64,${d.content}`
+                            : null);
+
+                        const getFileExtension = (filename: string) => {
+                          const match = filename?.match(/\.[0-9a-z]+$/i);
+                          return match ? match[0] : "";
+                        };
+                        const friendlyName = `${patient.lastName}_${patient.firstName}_${d.type}_${new Date(d.createdAt).toISOString().split("T")[0]}${getFileExtension(d.title)}`;
+                        const displayTitle = `${d.type.replace(/_/g, " ")}`;
+                        const isImage =
+                          fileSource?.match(/\.(jpeg|jpg|gif|png|webp)$/i) ||
+                          fileSource?.startsWith("data:image/");
+
+                        return (
+                          <div
+                            key={d.id}
+                            onClick={() => {
+                              if (fileSource) {
+                                if (isImage) {
+                                  setAnnotatorData({
+                                    url: fileSource,
+                                    title: friendlyName,
+                                  });
+                                } else {
+                                  window.open(fileSource, "_blank");
+                                }
+                              }
+                            }}
+                            className="group relative flex flex-col justify-between border rounded-xl overflow-hidden bg-card hover:shadow-md hover:border-primary/50 transition-all cursor-pointer"
+                          >
+                            {/* Preview Thumbnail Container */}
+                            <div className="w-full aspect-[4/3] bg-muted/30 relative flex items-center justify-center overflow-hidden border-b">
+                              {fileSource && isImage ? (
+                                <img
+                                  src={fileSource}
+                                  alt={d.title}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                />
+                              ) : (
+                                <div className="flex flex-col items-center justify-center p-4 text-muted-foreground group-hover:text-primary transition-colors">
+                                  <FileText className="h-10 w-10 mb-1 stroke-1" />
+                                  <span className="text-[10px] font-bold uppercase tracking-wider bg-muted px-2 py-0.5 rounded">
+                                    {getFileExtension(d.title).replace(
+                                      ".",
+                                      "",
+                                    ) || "DOC"}
+                                  </span>
+                                </div>
+                              )}
+                              <span className="absolute top-2 left-2 bg-background/90 backdrop-blur-sm text-foreground text-[10px] font-semibold px-2.5 py-0.5 rounded-full border shadow-sm">
+                                {d.type.replace(/_/g, " ")}
+                              </span>
+                            </div>
+
+                            {/* Card Content */}
+                            <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
+                              <div>
+                                <h4 className="text-sm font-semibold text-foreground group-hover:text-primary transition-colors line-clamp-1">
+                                  {displayTitle} Document
+                                </h4>
+                                <p
+                                  className="text-xs text-muted-foreground line-clamp-1 mt-0.5"
+                                  title={d.title}
+                                >
+                                  {d.title}
+                                </p>
+                              </div>
+
+                              <div className="space-y-1 text-xs text-muted-foreground border-t border-border/60 pt-2.5">
+                                <p className="line-clamp-1">
+                                  <span className="font-medium text-foreground">
+                                    Source:
+                                  </span>{" "}
+                                  {d.source}
+                                </p>
+                                <p className="line-clamp-1">
+                                  <span className="font-medium text-foreground">
+                                    Reason:
+                                  </span>{" "}
+                                  {d.reason}
+                                </p>
+                                <p>
+                                  <span className="font-medium text-foreground">
+                                    Uploaded:
+                                  </span>{" "}
+                                  {formatDate(d.createdAt)}
+                                </p>
+                                {d.notes && (
+                                  <p className="line-clamp-1 italic text-muted-foreground/80">
+                                    {d.notes}
+                                  </p>
+                                )}
+                              </div>
+
+                              {/* Card Footer */}
+                              <div className="pt-2 flex items-center justify-between border-t border-border/60 mt-auto">
+                                <span className="text-xs font-medium text-primary flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
+                                  <Eye className="h-3.5 w-3.5" />{" "}
+                                  {isImage ? "View & Annotate" : "Open File"}
+                                </span>
+                                {fileSource && (
+                                  <a
+                                    href={fileSource}
+                                    download={friendlyName}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                                    title="Download"
+                                  >
+                                    <Download className="h-4 w-4" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
-                </div>
-              )}
+                    <TablePagination
+                      total={allDocs.length}
+                      page={docPage}
+                      pageSize={docPageSize}
+                      itemName="documents"
+                      paramName="docPage"
+                    />
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>
+
+        <ImageAnnotatorDialog
+          key={annotatorData?.url || "annotator"}
+          isOpen={!!annotatorData}
+          onOpenChange={(open) => !open && setAnnotatorData(null)}
+          imageUrl={annotatorData?.url || ""}
+          title={annotatorData?.title || ""}
+        />
 
         {/* Notes */}
         <TabsContent value="notes" className="mt-4">
@@ -972,8 +1375,6 @@ function InstallmentsTab({
   }
 
   function handleCancelPlan(planId: string) {
-    if (!confirm("Are you sure you want to cancel this installment plan?"))
-      return;
     startTransition(async () => {
       const result = await cancelInstallmentPlan(clinicSlug, planId);
       if ("error" in result) {
@@ -1147,15 +1548,22 @@ function InstallmentsTab({
 
                   {plan.status === "ACTIVE" && (
                     <div className="flex gap-2 justify-end pt-2 border-t border-slate-100">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-red-600 border-red-200 hover:bg-red-50 text-xs font-bold rounded-lg"
-                        onClick={() => handleCancelPlan(plan.id)}
-                        disabled={isPending}
-                      >
-                        Cancel Plan
-                      </Button>
+                      <ConfirmActionDialog
+                        title="Cancel Installment Plan"
+                        description="Are you sure you want to cancel this installment plan? Any remaining unpaid balance will be marked as cancelled."
+                        loading={isPending}
+                        onConfirm={() => handleCancelPlan(plan.id)}
+                        trigger={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-red-600 border-red-200 hover:bg-red-50 text-xs font-bold rounded-lg"
+                            disabled={isPending}
+                          >
+                            Cancel Plan
+                          </Button>
+                        }
+                      />
                       <Button
                         size="sm"
                         className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg flex items-center gap-1"

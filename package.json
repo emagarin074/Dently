@@ -13,6 +13,7 @@
     "db:studio": "prisma studio",
     "db:generate": "prisma generate",
     "setup": "prisma generate && prisma db push && npx tsx prisma/seed.ts",
+    "monitor-clinics": "npx tsx src/scripts/monitor-subscriptions.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

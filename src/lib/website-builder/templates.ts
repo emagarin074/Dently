@@ -53,8 +53,8 @@ export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
           navLinks: [
             { label: "Services", sectionId: "services" },
             { label: "About Us", sectionId: "about" },
-            { label: "Doctors", sectionId: "doctors" },
-            { label: "Blogs", sectionId: "blogs" },
+            { label: "FAQs", sectionId: "faqs" },
+            { label: "Contact Us", sectionId: "contact" },
           ],
           heroBadgeIcon: "plane",
           heroBadgeText: "True 24/7",
@@ -64,6 +64,7 @@ export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
           heroSubheading:
             "Modern dentistry designed around your comfort.\nFrom routine checkups to advanced care, we make dental visits simple, clear, and stress-free.",
           heroCtaText: "Contact Us",
+          heroCtaSection: "contact",
           heroDentistCount: "15+",
           heroDentistText: "Expert Dentists for you",
           heroPills: [

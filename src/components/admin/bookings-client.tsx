@@ -55,7 +55,11 @@ import { updateQueueStatus, markQueueNoShow } from "@/app/actions/queue";
 import { type ProcedureOption } from "@/components/admin/add-procedure-dialog";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import { RescheduleDialog } from "@/components/admin/reschedule-dialog";
+import { CheckInDialog } from "@/components/admin/check-in-dialog";
 import { TablePagination } from "@/components/ui/pagination";
+import { AlertCircle } from "lucide-react";
+import { type BlockedDate } from "@/components/clinic/public-page";
+import { format } from "date-fns";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -126,6 +130,7 @@ interface Props {
   defaultTab: string;
   requestsTotal?: number;
   page?: number;
+  blockedDates?: BlockedDate[];
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -188,6 +193,7 @@ export function BookingsClient({
   defaultTab,
   requestsTotal = 0,
   page = 1,
+  blockedDates = [],
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -222,11 +228,12 @@ export function BookingsClient({
           <TabsTrigger value="queue">Queue</TabsTrigger>
         </TabsList>
 
-        <WalkInDialog
+        <NewAppointmentModal
           dentists={dentists}
           patients={patients}
           clinicSlug={clinicSlug}
           onDone={refresh}
+          blockedDates={blockedDates}
         />
       </div>
 
@@ -436,25 +443,17 @@ export function BookingsClient({
                         <div className="flex justify-end gap-1">
                           {a.status === "CONFIRMED" && (
                             <>
-                              <Button
-                                size="sm"
-                                className="h-7 px-2 bg-primary hover:bg-primary/90"
-                                disabled={loadingId === a.id}
-                                onClick={() =>
-                                  run(a.id, () =>
-                                    checkInAppointment(clinicSlug, a.id),
-                                  )
-                                }
-                              >
-                                <LogIn className="h-3 w-3 mr-1" />
-                                Check In
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-red-600 border-red-200 hover:bg-red-50"
-                                disabled={loadingId === a.id}
-                                onClick={() =>
+                              <CheckInDialog
+                                appointment={a}
+                                dentists={dentists}
+                                clinicSlug={clinicSlug}
+                                onDone={refresh}
+                              />
+                              <ConfirmActionDialog
+                                title="Mark Appointment as No-Show"
+                                description={`Are you sure you want to mark the appointment for ${apptName(a)} as no-show?`}
+                                loading={loadingId === a.id}
+                                onConfirm={() =>
                                   run(a.id, () =>
                                     updateAppointmentStatus(
                                       clinicSlug,
@@ -463,9 +462,17 @@ export function BookingsClient({
                                     ),
                                   )
                                 }
-                              >
-                                No-show
-                              </Button>
+                                trigger={
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-red-600 border-red-200 hover:bg-red-50"
+                                    disabled={loadingId === a.id}
+                                  >
+                                    No-show
+                                  </Button>
+                                }
+                              />
                             </>
                           )}
                           {a.status === "CHECKED_IN" && (
@@ -486,18 +493,18 @@ export function BookingsClient({
 
       {/* ── Tab 3: Queue Kanban ── */}
       <TabsContent value="queue">
-        <div className="flex gap-4 overflow-x-auto pb-4 min-h-[400px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pb-4 min-h-[400px]">
           {QUEUE_COLS.map((col) => {
             const cards = todayQueue.filter((q) => q.status === col.status);
             return (
-              <div key={col.status} className="flex-shrink-0 w-72">
+              <div key={col.status} className="flex flex-col min-w-0">
                 <div
                   className={`flex items-center justify-between mb-3 px-3 py-2 rounded-lg border ${col.color}`}
                 >
                   <span className="font-semibold text-sm">{col.label}</span>
                   <span className="text-xs font-bold">{cards.length}</span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 flex-1">
                   {cards.map((entry) => (
                     <QueueCard
                       key={entry.id}
@@ -615,17 +622,24 @@ function QueueCard({
           )}
 
           {entry.status === "WAITING" && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50"
-              disabled={isLoading}
-              onClick={() =>
+            <ConfirmActionDialog
+              title="Mark Patient as No-Show"
+              description={`Are you sure you want to mark ${entry.patientName} as no-show? This will remove them from the queue.`}
+              loading={isLoading}
+              onConfirm={() =>
                 onAction(entry.id, () => markQueueNoShow(clinicSlug, entry.id))
               }
-            >
-              No-show
-            </Button>
+              trigger={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                  disabled={isLoading}
+                >
+                  No-show
+                </Button>
+              }
+            />
           )}
         </div>
       </CardContent>
@@ -763,223 +777,336 @@ function QueueBadge({ status }: { status: string }) {
   );
 }
 
-// ─── Walk-in / manual booking dialog ─────────────────────────────────────────
+// ─── New Appointment Modal ───────────────────────────────────────────────────
 
-function WalkInDialog({
-  dentists,
+export function NewAppointmentModal({
   patients,
+  dentists,
   clinicSlug,
   onDone,
+  blockedDates = [],
 }: {
   dentists: { id: string; name: string }[];
   patients: PatientOption[];
   clinicSlug: string;
   onDone: () => void;
+  blockedDates?: BlockedDate[];
 }) {
   const [open, setOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingFd, setPendingFd] = useState<FormData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isWalkIn, setIsWalkIn] = useState(true);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const [selectedDateVal, setSelectedDateVal] = useState<string>(todayStr);
   const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(
     null,
   );
   const [patientSearch, setPatientSearch] = useState("");
   const [patientPopoverOpen, setPatientPopoverOpen] = useState(false);
+  const [dateError, setDateError] = useState<string | null>(null);
 
-  const filteredPatients = patients.filter((p) => {
-    const full = `${p.firstName} ${p.lastName} ${p.phone ?? ""}`.toLowerCase();
-    return full.includes(patientSearch.toLowerCase());
-  });
+  const isToday = selectedDateVal === todayStr;
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function isDateBlocked(dateStr: string): BlockedDate | null {
+    if (!dateStr || dateStr === todayStr) return null;
+    return (
+      blockedDates.find(
+        (b) => dateStr >= b.startDate && dateStr <= b.endDate,
+      ) ?? null
+    );
+  }
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selectedPatient) {
       toast.error("Select a patient");
       return;
     }
-    setLoading(true);
     const fd = new FormData(e.currentTarget);
-    fd.set("isWalkIn", isWalkIn ? "true" : "false");
+    const chosenDate = (fd.get("preferredDate") as string) || selectedDateVal;
+    const isChosenToday = chosenDate === todayStr;
+
+    if (!isChosenToday) {
+      const blocked = isDateBlocked(chosenDate);
+      if (blocked) {
+        setDateError(
+          `This date is unavailable (${blocked.title}). Please choose another date.`,
+        );
+        return;
+      }
+    }
+
+    fd.set("isWalkIn", isChosenToday ? "true" : "false");
+    fd.set("preferredDate", chosenDate);
     fd.set("patientId", selectedPatient.id);
     fd.set(
       "bookingName",
       `${selectedPatient.firstName} ${selectedPatient.lastName}`,
     );
-    const result = await createManualBooking(clinicSlug, fd);
-    if ("error" in result && result.error) toast.error(result.error);
-    else {
+
+    setPendingFd(fd);
+    setConfirmOpen(true);
+  }
+
+  async function handleConfirmCreate() {
+    if (!pendingFd) return;
+    setLoading(true);
+    const chosenDate =
+      (pendingFd.get("preferredDate") as string) || selectedDateVal;
+    const isChosenToday = chosenDate === todayStr;
+
+    const result = await createManualBooking(clinicSlug, pendingFd);
+    if ("error" in result && result.error) {
+      toast.error(result.error);
+    } else {
       const num = (result as { queueNumber?: number }).queueNumber;
       toast.success(
-        isWalkIn ? `Checked in — Queue #${num}` : "Appointment created",
+        isChosenToday ? `Checked in — Queue #${num}` : "Appointment created",
       );
+      setConfirmOpen(false);
       setOpen(false);
       setSelectedPatient(null);
       setPatientSearch("");
+      setDateError(null);
+      setSelectedDateVal(todayStr);
+      setPendingFd(null);
       onDone();
     }
     setLoading(false);
   }
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (!v) {
-          setSelectedPatient(null);
-          setPatientSearch("");
-        }
-      }}
-    >
-      <DialogTrigger asChild>
-        <Button size="sm">
-          <Plus className="h-4 w-4 mr-1" />
-          Add Appointment
-        </Button>
-      </DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New Appointment</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="flex gap-3">
-            <button
-              type="button"
-              className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${isWalkIn ? "bg-primary text-white border-primary" : "hover:border-primary"}`}
-              onClick={() => setIsWalkIn(true)}
-            >
-              Walk-in
-            </button>
-            <button
-              type="button"
-              className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${!isWalkIn ? "bg-primary text-white border-primary" : "hover:border-primary"}`}
-              onClick={() => setIsWalkIn(false)}
-            >
-              Scheduled
-            </button>
-          </div>
-
-          {/* Patient picker */}
-          <div className="space-y-2">
-            <Label>
-              Patient <span className="text-red-500">*</span>
-            </Label>
-            <Popover
-              open={patientPopoverOpen}
-              onOpenChange={setPatientPopoverOpen}
-            >
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full justify-start font-normal"
-                >
-                  {selectedPatient ? (
-                    <>
-                      <span className="font-medium">
-                        {selectedPatient.firstName} {selectedPatient.lastName}
-                      </span>
-                      {selectedPatient.phone && (
-                        <span className="ml-2 text-muted-foreground text-xs">
-                          {selectedPatient.phone}
-                        </span>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-muted-foreground">
-                      Search patient...
-                    </span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[340px] p-0" align="start">
-                <Command>
-                  <CommandInput
-                    placeholder="Search by name or phone..."
-                    value={patientSearch}
-                    onValueChange={setPatientSearch}
-                  />
-                  <CommandList>
-                    <CommandEmpty>No patients found.</CommandEmpty>
-                    <CommandGroup>
-                      {filteredPatients.slice(0, 30).map((p) => (
-                        <CommandItem
-                          key={p.id}
-                          onSelect={() => {
-                            setSelectedPatient(p);
-                            setPatientPopoverOpen(false);
-                          }}
-                          className="cursor-pointer"
-                        >
-                          <div>
-                            <p className="font-medium">
-                              {p.firstName} {p.lastName}
-                            </p>
-                            {p.phone && (
-                              <p className="text-xs text-muted-foreground">
-                                {p.phone}
-                              </p>
-                            )}
-                          </div>
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Service / Concern</Label>
-            <Input
-              name="serviceType"
-              placeholder="e.g. Cleaning, Extraction..."
-              required
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          setOpen(v);
+          if (!v) {
+            setSelectedPatient(null);
+            setPatientSearch("");
+            setDateError(null);
+            setSelectedDateVal(todayStr);
+          }
+        }}
+      >
+        <DialogTrigger asChild>
+          <Button size="sm">
+            <Plus className="h-4 w-4 mr-1" />
+            Add Appointment
+          </Button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Appointment</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Date</Label>
+              <Label>
+                Patient <span className="text-red-500">*</span>
+              </Label>
+              <Popover
+                open={patientPopoverOpen}
+                onOpenChange={setPatientPopoverOpen}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start font-normal"
+                  >
+                    {selectedPatient ? (
+                      <>
+                        <span className="font-medium">
+                          {selectedPatient.firstName} {selectedPatient.lastName}
+                        </span>
+                        {selectedPatient.phone && (
+                          <span className="ml-2 text-muted-foreground text-xs">
+                            {selectedPatient.phone}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Search patient...
+                      </span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[340px] p-0" align="start">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search by name or phone..."
+                      value={patientSearch}
+                      onValueChange={setPatientSearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>No patients found.</CommandEmpty>
+                      <CommandGroup>
+                        {patients
+                          .filter((p) => {
+                            const full =
+                              `${p.firstName} ${p.lastName} ${p.phone ?? ""}`.toLowerCase();
+                            return full.includes(patientSearch.toLowerCase());
+                          })
+                          .slice(0, 30)
+                          .map((p) => (
+                            <CommandItem
+                              key={p.id}
+                              onSelect={() => {
+                                setSelectedPatient(p);
+                                setPatientPopoverOpen(false);
+                              }}
+                              className="cursor-pointer"
+                            >
+                              <div>
+                                <p className="font-medium">
+                                  {p.firstName} {p.lastName}
+                                </p>
+                                {p.phone && (
+                                  <p className="text-xs text-muted-foreground">
+                                    {p.phone}
+                                  </p>
+                                )}
+                              </div>
+                            </CommandItem>
+                          ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Service / Concern</Label>
               <Input
-                name="preferredDate"
-                type="date"
+                name="serviceType"
+                placeholder="e.g. Cleaning, Extraction..."
                 required
-                defaultValue={new Date().toISOString().slice(0, 10)}
               />
             </div>
-            <div className="space-y-2">
-              <Label>Time</Label>
-              <Input name="scheduledTime" type="time" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>Date</Label>
+                <Input
+                  name="preferredDate"
+                  type="date"
+                  required
+                  value={selectedDateVal}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedDateVal(val);
+                    const blocked = isDateBlocked(val);
+                    setDateError(
+                      blocked
+                        ? `This date is unavailable (${blocked.title}). Please choose another date.`
+                        : null,
+                    );
+                  }}
+                />
+                {isToday ? (
+                  <p className="text-xs text-green-700 font-medium">
+                    Same-day visit — Checks patient directly into Today&apos;s
+                    Queue.
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-blue-700 font-medium">
+                      Scheduled appointment for future date.
+                    </p>
+                    {dateError && (
+                      <p className="flex items-center gap-1.5 text-xs text-red-600">
+                        <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                        {dateError}
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Time</Label>
+                <Input name="scheduledTime" type="time" />
+              </div>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Assign Dentist</Label>
-            <Select name="dentistId">
-              <SelectTrigger>
-                <SelectValue placeholder="No preference" />
-              </SelectTrigger>
-              <SelectContent>
-                {dentists.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    {d.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={loading || !selectedPatient}
-          >
-            {loading
-              ? "Saving..."
-              : isWalkIn
-                ? "Check In Now"
-                : "Create Appointment"}
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+            <div className="space-y-2">
+              <Label>Assign Dentist</Label>
+              <Select name="dentistId">
+                <SelectTrigger>
+                  <SelectValue placeholder="No preference" />
+                </SelectTrigger>
+                <SelectContent>
+                  {dentists.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={loading || !selectedPatient}
+            >
+              {isToday
+                ? "Check In Now (Today)"
+                : "Create Scheduled Appointment"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation Warning Dialog */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {isToday
+                ? "Confirm Walk-in Check-in"
+                : "Confirm Appointment Schedule"}
+            </DialogTitle>
+            <DialogDescription className="pt-2 text-sm text-slate-700">
+              {isToday ? (
+                <span>
+                  Are you sure you want to check in{" "}
+                  <strong>
+                    {selectedPatient?.firstName} {selectedPatient?.lastName}
+                  </strong>{" "}
+                  for today? This will immediately add them to Today&apos;s
+                  Queue.
+                </span>
+              ) : (
+                <span>
+                  Are you sure you want to schedule an appointment for{" "}
+                  <strong>
+                    {selectedPatient?.firstName} {selectedPatient?.lastName}
+                  </strong>{" "}
+                  on{" "}
+                  <strong>
+                    {format(
+                      new Date(selectedDateVal + "T00:00:00"),
+                      "EEEE, MMMM d, yyyy",
+                    )}
+                  </strong>
+                  ?
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmCreate} disabled={loading}>
+              {loading ? "Processing..." : "Confirm & Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

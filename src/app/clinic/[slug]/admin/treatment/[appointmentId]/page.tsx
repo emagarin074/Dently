@@ -106,6 +106,11 @@ export default async function TreatmentPage({ params }: Props) {
     hasExistingPhoto = allTypes.includes("PHOTO");
   }
 
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: user.clinicId },
+    select: { name: true, address: true, phone: true, email: true },
+  });
+
   return (
     <>
       <AdminHeader
@@ -121,6 +126,7 @@ export default async function TreatmentPage({ params }: Props) {
           hasExistingConsent={hasExistingConsent}
           hasExistingXray={hasExistingXray}
           hasExistingPhoto={hasExistingPhoto}
+          clinicInfo={clinic ? JSON.parse(JSON.stringify(clinic)) : null}
         />
       </main>
     </>

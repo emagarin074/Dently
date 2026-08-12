@@ -36,6 +36,8 @@ model Clinic {
   websitePage    WebsitePage?
   installmentPlans InstallmentPlan[]
   inquiries      Inquiry[]
+  compensationPrograms CompensationProgram[]
+  compensationLedgers  CompensationLedger[]
 
   @@index([slug])
 }
@@ -229,6 +231,8 @@ model Appointment {
   @@index([clinicId])
   @@index([clinicId, preferredDate])
   @@index([clinicId, status])
+  @@index([clinicId, dentistId, preferredDate])
+  @@index([clinicId, status, preferredDate])
 }
 
 // ─── QUEUE ────────────────────────────────────────────────────────────────────
@@ -261,6 +265,7 @@ model QueueEntry {
 
   @@index([clinicId])
   @@index([clinicId, date])
+  @@index([clinicId, date, status])
 }
 
 // ─── CALENDAR BLOCKS ─────────────────────────────────────────────────────────
@@ -414,6 +419,8 @@ model Billing {
 
   @@index([clinicId])
   @@index([clinicId, status])
+  @@index([clinicId, createdAt])
+  @@index([clinicId, status, createdAt])
 }
 
 model Payment {
@@ -579,9 +586,11 @@ model InstallmentPlan {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   installments    InstallmentPayment[]
+  scheduleItems   InstallmentScheduleItem[]
 
   @@index([clinicId])
   @@index([patientId])
+  @@index([clinicId, status])
 }
 
 model InstallmentPayment {
@@ -598,6 +607,23 @@ model InstallmentPayment {
   @@index([installmentPlanId])
 }
 
+model InstallmentScheduleItem {
+  id                String          @id @default(cuid())
+  installmentPlanId String
+  installmentPlan   InstallmentPlan @relation(fields: [installmentPlanId], references: [id], onDelete: Cascade)
+  installmentNumber Int
+  dueDate           DateTime
+  amount            Decimal         @db.Decimal(10, 2)
+  status            String          @default("PENDING")
+  reminderSent      Boolean         @default(false)
+  paidAt            DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([installmentPlanId])
+  @@index([dueDate, status])
+}
+
 model Inquiry {
   id        String   @id @default(cuid())
   clinicId  String
@@ -610,4 +636,117 @@ model Inquiry {
   createdAt DateTime @default(now())
 
   @@index([clinicId])
+}
+
+// ─── COMPENSATION ENGINE ──────────────────────────────────────────────────────
+
+model CompensationProgram {
+  id              String   @id @default(cuid())
+  clinicId        String
+  clinic          Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name            String
+  description     String?
+  version         Int      @default(1)
+  status          String   @default("DRAFT") // DRAFT, PUBLISHED, ARCHIVED
+  isLatest        Boolean  @default(true)
+  effectiveDate   DateTime?
+  expirationDate  DateTime?
+  parentProgramId String?
+  branch          String?
+  updatedBy       String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  rules           CompensationRule[]
+  assignments     CompensationAssignment[]
+  ledgers         CompensationLedger[]
+
+  @@index([clinicId])
+  @@index([clinicId, status])
+}
+
+model CompensationRule {
+  id             String              @id @default(cuid())
+  programId      String
+  program        CompensationProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  ruleType       String              // REVENUE_SPLIT, PROCEDURE_OVERRIDE, PRODUCTION_TIER, VOLUME_BONUS, FIXED_BONUS, SALARY, COLLECTION_RULE, LAB_FEE_RULE, PROMOTION_RULE, INSURANCE_RULE, REFERRAL_COMMISSION, ASSISTANT_SHARE, HYGIENIST_SHARE
+  priority       Int
+  enabled        Boolean             @default(true)
+  behavior       String              // REPLACE, MODIFY, ADD, BLOCK
+  config         Json                // Rule configuration
+  effectiveDate  DateTime?
+  expirationDate DateTime?
+
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  @@index([programId])
+  @@index([programId, priority])
+}
+
+model CompensationAssignment {
+  id         String              @id @default(cuid())
+  clinicId   String
+  programId  String
+  program    CompensationProgram @relation(fields: [programId], references: [id], onDelete: Cascade)
+  targetType String              // INDIVIDUAL, ROLE, SPECIALIZATION, BRANCH, CLINIC
+  targetId   String?             // UserId, Role name, Specialization, Branch name
+
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  @@index([clinicId])
+  @@index([programId])
+  @@index([clinicId, targetType, targetId])
+}
+
+model CompensationLedger {
+  id             String               @id @default(cuid())
+  clinicId       String
+  clinic         Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  treatmentId    String?
+  patientId      String?
+  dentistId      String
+  procedureName  String
+  branch         String?
+  grossFee       Decimal              @db.Decimal(10, 2)
+  discount       Decimal              @default(0) @db.Decimal(10, 2)
+  labFee         Decimal              @default(0) @db.Decimal(10, 2)
+  tax            Decimal              @default(0) @db.Decimal(10, 2)
+  netRevenue     Decimal              @db.Decimal(10, 2)
+  programId      String
+  program        CompensationProgram  @relation(fields: [programId], references: [id], onDelete: Restrict)
+  programVersion Int
+  appliedRules   Json                 // Audit list of triggered rules & outputs
+  commission     Decimal              @db.Decimal(10, 2)
+  bonuses        Decimal              @default(0) @db.Decimal(10, 2)
+  adjustments    Decimal              @default(0) @db.Decimal(10, 2)
+  clinicRevenue  Decimal              @db.Decimal(10, 2)
+  status         String               @default("PENDING") // PENDING, PAYABLE, BLOCKED, PAID
+  paymentStatus  String               @default("UNPAID")
+  createdBy      String?
+
+  createdAt      DateTime             @default(now())
+
+  @@index([clinicId])
+  @@index([clinicId, dentistId])
+  @@index([clinicId, status])
+}
+
+model CompensationAuditLog {
+  id            String   @id @default(cuid())
+  clinicId      String
+  programId     String
+  ruleId        String?
+  action        String
+  previousValue Json?
+  newValue      Json?
+  userId        String
+  branch        String?
+  reason        String?
+  createdAt     DateTime @default(now())
+
+  @@index([clinicId])
+  @@index([programId])
 }

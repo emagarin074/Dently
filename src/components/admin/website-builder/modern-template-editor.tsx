@@ -484,6 +484,36 @@ export function ModernTemplateEditor({ section, onUpdateContent }: Props) {
                 </div>
 
                 <div className="space-y-2">
+                  <Label>CTA Target Section</Label>
+                  <Select
+                    value={
+                      (content.heroCtaSection as string) ||
+                      ((content.heroCtaText as string)
+                        ?.toLowerCase()
+                        .includes("contact")
+                        ? "contact"
+                        : "booking")
+                    }
+                    onValueChange={(val) =>
+                      onUpdateContent({ heroCtaSection: val })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select target section..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="contact">
+                        Contact Us Section
+                      </SelectItem>
+                      <SelectItem value="booking">Booking Section</SelectItem>
+                      <SelectItem value="services">Services Section</SelectItem>
+                      <SelectItem value="about">About Us Section</SelectItem>
+                      <SelectItem value="faqs">FAQs Section</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Trust Count Text (e.g. 1,000+)</Label>
                   <Input
                     value={(content.heroTrustCount as string) || ""}

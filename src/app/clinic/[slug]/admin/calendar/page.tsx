@@ -1,24 +1,26 @@
-import { requireAuth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { redirect } from "next/navigation"
-import { AdminHeader } from "@/components/admin/header"
-import { CalendarClient } from "@/components/admin/calendar-client"
-import type { Metadata } from "next"
+import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { redirect } from "next/navigation";
+import { AdminHeader } from "@/components/admin/header";
+import { CalendarClient } from "@/components/admin/calendar-client";
+import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Calendar" }
+export const metadata: Metadata = { title: "Calendar" };
 
-interface Props { params: Promise<{ slug: string }> }
+interface Props {
+  params: Promise<{ slug: string }>;
+}
 
 export default async function CalendarPage({ params }: Props) {
-  const { slug } = await params
-  const user = await requireAuth(slug)
-  if (!user) redirect(`/clinic/${slug}/login`)
+  const { slug } = await params;
+  const user = await requireAuth(slug);
+  if (!user) redirect(`/clinic/${slug}/login`);
 
-  const now = new Date()
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-  const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0)
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0);
 
-  const [appointments, blocks, dentists] = await Promise.all([
+  const [appointments, blocks, dentists, settings] = await Promise.all([
     prisma.appointment.findMany({
       where: {
         clinicId: user.clinicId,
@@ -26,8 +28,12 @@ export default async function CalendarPage({ params }: Props) {
         status: { not: "CANCELLED" },
       },
       select: {
-        id: true, preferredDate: true, scheduledDate: true, scheduledTime: true,
-        status: true, serviceType: true,
+        id: true,
+        preferredDate: true,
+        scheduledDate: true,
+        scheduledTime: true,
+        status: true,
+        serviceType: true,
         patient: { select: { firstName: true, lastName: true } },
         bookingName: true,
         dentist: { select: { name: true } },
@@ -40,7 +46,11 @@ export default async function CalendarPage({ params }: Props) {
       where: { clinicId: user.clinicId, isActive: true },
       select: { id: true, name: true },
     }),
-  ])
+    prisma.clinicSettings.findUnique({
+      where: { clinicId: user.clinicId },
+      select: { operatingHours: true },
+    }),
+  ]);
 
   return (
     <>
@@ -50,10 +60,11 @@ export default async function CalendarPage({ params }: Props) {
           appointments={JSON.parse(JSON.stringify(appointments))}
           blocks={JSON.parse(JSON.stringify(blocks))}
           dentists={dentists}
+          operatingHours={settings?.operatingHours || null}
           clinicSlug={slug}
           userRole={user.role}
         />
       </main>
     </>
-  )
+  );
 }

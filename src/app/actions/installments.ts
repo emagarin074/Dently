@@ -4,6 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { PaymentMethod, InstallmentStatus } from "@prisma/client";
+import {
+  sendClinicEmail,
+  installmentReminderEmail,
+  installmentOverdueEmail,
+  installmentReceiptEmail,
+} from "@/lib/email";
 
 const VALID_PAYMENT_METHODS: string[] = Object.values(PaymentMethod);
 
@@ -23,6 +29,7 @@ export async function createInstallmentPlanWithDownpayment(
     method: string;
     reference?: string;
     notes?: string;
+    scheduleItems?: { dueDate: string; amount: number }[];
   },
 ) {
   const user = await requireAuth(clinicSlug);
@@ -74,6 +81,28 @@ export async function createInstallmentPlanWithDownpayment(
           notes: "Downpayment",
         },
       });
+
+      // 3. Create schedule items if provided
+      if (data.scheduleItems && data.scheduleItems.length > 0) {
+        let currentCovered = data.downpayment;
+        for (let i = 0; i < data.scheduleItems.length; i++) {
+          const item = data.scheduleItems[i];
+          const isCovered = currentCovered >= item.amount;
+          if (isCovered) {
+            currentCovered -= item.amount;
+          }
+          await tx.installmentScheduleItem.create({
+            data: {
+              installmentPlanId: plan.id,
+              installmentNumber: i + 1,
+              dueDate: new Date(item.dueDate),
+              amount: item.amount,
+              status: isCovered ? "PAID" : "PENDING",
+              ...(isCovered && { paidAt: new Date() }),
+            },
+          });
+        }
+      }
 
       // 3. Also record the downpayment on the billing invoice
       const billingForUpdate = await tx.billing.findUnique({
@@ -199,13 +228,24 @@ export async function recordInstallmentPayment(
         },
       });
 
+      // Update next pending schedule item if present
+      const firstPendingItem = await tx.installmentScheduleItem.findFirst({
+        where: { installmentPlanId: planId, status: "PENDING" },
+        orderBy: { installmentNumber: "asc" },
+      });
+      if (firstPendingItem) {
+        await tx.installmentScheduleItem.update({
+          where: { id: firstPendingItem.id },
+          data: { status: "PAID", paidAt: new Date() },
+        });
+      }
+
       // 3. If plan is linked to a billing invoice, adjust billing progress
       if (plan.billing) {
         const newBillingPaid = Number(plan.billing.paidAmount) + data.amount;
         const newBillingStatus =
           newBillingPaid > 0 ? "PARTIALLY_PAID" : "UNPAID";
 
-        // Update billing invoice (without creating duplicate payment details on original invoice record)
         await tx.billing.update({
           where: { id: plan.billing.id },
           data: {
@@ -213,26 +253,9 @@ export async function recordInstallmentPayment(
             status: newBillingStatus,
           },
         });
-
-        // 4. Update linked queue and appointment if fully or partially paid
-        if (newBillingStatus === "PARTIALLY_PAID") {
-          const queueEntry = await tx.queueEntry.findFirst({
-            where: { appointmentId: plan.billing.appointmentId },
-          });
-          if (queueEntry) {
-            await tx.queueEntry.update({
-              where: { id: queueEntry.id },
-              data: { status: "COMPLETED", completedAt: new Date() },
-            });
-          }
-          await tx.appointment.update({
-            where: { id: plan.billing.appointmentId },
-            data: { status: "COMPLETED" },
-          });
-        }
       }
 
-      // 5. If currentAppointmentId is provided (e.g. paying from a different checkout session), complete that queue too
+      // 4. If currentAppointmentId is provided, complete queue entry and appointment
       if (data.currentAppointmentId) {
         const currentQueue = await tx.queueEntry.findFirst({
           where: { appointmentId: data.currentAppointmentId },
@@ -249,6 +272,38 @@ export async function recordInstallmentPayment(
         });
       }
     });
+
+    // Send receipt email
+    const fullPlan = await prisma.installmentPlan.findUnique({
+      where: { id: planId },
+      include: {
+        patient: { select: { firstName: true, lastName: true, email: true } },
+        clinic: { include: { settings: true } },
+      },
+    });
+
+    if (fullPlan?.patient.email && fullPlan.clinic) {
+      const patientName = `${fullPlan.patient.firstName} ${fullPlan.patient.lastName}`;
+      const clinicName = fullPlan.clinic.name;
+      const remainingBalance = `$${(
+        Number(fullPlan.totalAmount) - Number(fullPlan.paidAmount)
+      ).toFixed(2)}`;
+
+      await sendClinicEmail({
+        to: fullPlan.patient.email,
+        subject: `Installment Payment Received – ${clinicName}`,
+        html: installmentReceiptEmail({
+          clinicName,
+          patientName,
+          installmentNumber: 1,
+          amountPaid: `$${data.amount.toFixed(2)}`,
+          paymentMethod: data.method,
+          remainingBalance,
+        }),
+        clinicSettings: fullPlan.clinic.settings,
+        clinicName,
+      });
+    }
 
     revalidate(clinicSlug, plan.patientId);
     return { success: true };
@@ -432,5 +487,108 @@ export async function recordCombinedPayment(
   } catch (error) {
     console.error("Record combined payment error:", error);
     return { error: "Failed to process combined payment." };
+  }
+}
+
+export async function sendInstallmentReminder(
+  clinicSlug: string,
+  scheduleItemId: string,
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
+  try {
+    const item = await prisma.installmentScheduleItem.findUnique({
+      where: { id: scheduleItemId },
+      include: {
+        installmentPlan: {
+          include: {
+            patient: {
+              select: { firstName: true, lastName: true, email: true },
+            },
+            clinic: { include: { settings: true } },
+          },
+        },
+      },
+    });
+
+    if (!item || item.installmentPlan.clinicId !== user.clinicId) {
+      return { error: "Installment schedule item not found." };
+    }
+
+    if (item.status === "PAID") {
+      return { error: "This installment item is already paid." };
+    }
+
+    const patientEmail = item.installmentPlan.patient.email;
+    if (!patientEmail) {
+      return { error: "Patient does not have an email address on file." };
+    }
+
+    const patientName = `${item.installmentPlan.patient.firstName} ${item.installmentPlan.patient.lastName}`;
+    const clinicName = item.installmentPlan.clinic.name;
+    const clinicSettings = item.installmentPlan.clinic.settings;
+    const isOverdue = new Date(item.dueDate) < new Date();
+
+    const formattedDate = new Date(item.dueDate).toLocaleDateString("en-US", {
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+    const formattedAmount = `$${Number(item.amount).toFixed(2)}`;
+    const remainingPlanBalance = `$${(
+      Number(item.installmentPlan.totalAmount) -
+      Number(item.installmentPlan.paidAmount)
+    ).toFixed(2)}`;
+
+    const emailHtml = isOverdue
+      ? installmentOverdueEmail({
+          clinicName,
+          patientName,
+          installmentNumber: item.installmentNumber,
+          dueDate: formattedDate,
+          amount: formattedAmount,
+        })
+      : installmentReminderEmail({
+          clinicName,
+          patientName,
+          installmentNumber: item.installmentNumber,
+          dueDate: formattedDate,
+          amount: formattedAmount,
+          remainingBalance: remainingPlanBalance,
+        });
+
+    const subject = isOverdue
+      ? `Payment Overdue Notice – ${clinicName}`
+      : `Upcoming Payment Reminder – ${clinicName}`;
+
+    const sendRes = await sendClinicEmail({
+      to: patientEmail,
+      subject,
+      html: emailHtml,
+      clinicSettings,
+      clinicName,
+    });
+
+    if (!sendRes.success) {
+      return {
+        error:
+          sendRes.error ||
+          "Failed to send email reminder. Please check your clinic SMTP settings.",
+      };
+    }
+
+    await prisma.installmentScheduleItem.update({
+      where: { id: scheduleItemId },
+      data: { reminderSent: true },
+    });
+
+    revalidate(clinicSlug, item.installmentPlan.patientId);
+    return { success: true };
+  } catch (error) {
+    console.error("Send installment reminder error:", error);
+    return { error: "Failed to send installment reminder email." };
   }
 }

@@ -13,6 +13,7 @@ import { slugify } from "@/lib/utils";
 import { z } from "zod";
 
 import { Gender } from "@prisma/client";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 const registerUserSchema = z
   .object({
@@ -207,6 +208,16 @@ export async function loginUser(formData: FormData) {
   if (!parsed.success) return { error: "Invalid credentials." };
 
   const { email, password, clinicSlug } = parsed.data;
+
+  const ip = await getClientIp();
+  const rateCheck = checkRateLimit(`login_${ip}_${email}`, 5, 900000);
+  if (!rateCheck.success) {
+    const mins = Math.ceil(rateCheck.resetMs / 60000);
+    return {
+      error: `Too many failed login attempts. Please wait ${mins} minute(s) before trying again.`,
+    };
+  }
+
   let redirectPath: string | null = null;
 
   try {
@@ -259,6 +270,15 @@ export async function loginGlobal(formData: FormData) {
   const password = formData.get("password") as string;
 
   if (!email || !password) return { error: "Email and password are required." };
+
+  const ip = await getClientIp();
+  const rateCheck = checkRateLimit(`login_${ip}_${email}`, 5, 900000);
+  if (!rateCheck.success) {
+    const mins = Math.ceil(rateCheck.resetMs / 60000);
+    return {
+      error: `Too many failed login attempts. Please wait ${mins} minute(s) before trying again.`,
+    };
+  }
 
   let redirectPath: string | null = null;
 

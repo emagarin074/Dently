@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useTransition } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   getFilteredAppointments,
   updateAppointmentStatus,
@@ -21,8 +22,9 @@ import { formatDateShort } from "@/lib/utils";
 import { toast } from "sonner";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import { RescheduleDialog } from "@/components/admin/reschedule-dialog";
+import { CheckInDialog } from "@/components/admin/check-in-dialog";
 import { LogIn, X, Check } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { TablePagination } from "@/components/ui/pagination";
 
 interface AppointmentListType {
   id: string;
@@ -38,6 +40,7 @@ interface AppointmentListType {
 interface ScheduleListProps {
   clinicSlug: string;
   initialAppointments: AppointmentListType[];
+  dentists?: { id: string; name: string }[];
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -52,11 +55,22 @@ const STATUS_COLORS: Record<string, string> = {
 export function ScheduleListClient({
   clinicSlug,
   initialAppointments,
+  dentists = [],
 }: ScheduleListProps) {
   const [appointments, setAppointments] =
     useState<AppointmentListType[]>(initialAppointments);
   const [, startTransition] = useTransition();
   const [loadingId, setLoadingId] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+  const page = Number(searchParams.get("page")) || 1;
+  const pageSize = 10;
+  const total = appointments.length;
+
+  const paginatedAppointments = appointments.slice(
+    (page - 1) * pageSize,
+    page * pageSize,
+  );
 
   const [filters, setFilters] = useState({
     from: "",
@@ -192,7 +206,7 @@ export function ScheduleListClient({
                     </td>
                   </tr>
                 )}
-                {appointments.map((a: AppointmentListType) => (
+                {paginatedAppointments.map((a: AppointmentListType) => (
                   <tr
                     key={a.id}
                     className="border-b hover:bg-muted/20 transition-colors"
@@ -285,25 +299,11 @@ export function ScheduleListClient({
                           />
                         )}
                         {a.status === "CONFIRMED" && (
-                          <ConfirmActionDialog
-                            title="Check In Patient"
-                            description={`Are you sure you want to check in ${apptName(a)}?`}
-                            loading={loadingId === a.id}
-                            onConfirm={() =>
-                              run(a.id, () =>
-                                checkInAppointment(clinicSlug, a.id),
-                              )
-                            }
-                            trigger={
-                              <Button
-                                size="sm"
-                                className="h-7 px-2 bg-primary hover:bg-primary/90"
-                                disabled={loadingId === a.id}
-                              >
-                                <LogIn className="h-3 w-3 mr-1" />
-                                Check In
-                              </Button>
-                            }
+                          <CheckInDialog
+                            appointment={a}
+                            dentists={dentists}
+                            clinicSlug={clinicSlug}
+                            onDone={refresh}
                           />
                         )}
                       </div>
@@ -315,6 +315,12 @@ export function ScheduleListClient({
           </div>
         </CardContent>
       </Card>
+      <TablePagination
+        total={total}
+        page={page}
+        pageSize={pageSize}
+        itemName="appointments"
+      />
     </div>
   );
 }

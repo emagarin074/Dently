@@ -4,7 +4,7 @@ services:
     container_name: dently_postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5433}:5432"
     environment:
       POSTGRES_USER: dently
       POSTGRES_PASSWORD: dently

@@ -30,8 +30,14 @@ import {
   CheckCircle,
   AlertTriangle,
   CreditCard,
+  Printer,
 } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import {
+  formatCurrency,
+  formatDate,
+  renderDocumentTemplate,
+  handlePrintDocument,
+} from "@/lib/utils";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -84,6 +90,12 @@ interface Props {
   hasExistingConsent: boolean;
   hasExistingXray: boolean;
   hasExistingPhoto: boolean;
+  clinicInfo?: {
+    name: string;
+    address: string | null;
+    phone: string | null;
+    email: string | null;
+  } | null;
 }
 
 function calculateDynamicPrice(
@@ -152,27 +164,25 @@ function calculateDynamicPrice(
 }
 
 function buildGenericConsentHtml(procedureName: string) {
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Consent Form – ${procedureName}</title>
-  <style>
-    body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 24px; font-size: 13px; color: #111; }
-    h1 { font-size: 18px; text-align: center; margin-bottom: 4px; }
-    h2 { font-size: 13px; text-align: center; color: #555; font-weight: normal; margin-bottom: 24px; }
-    p { line-height: 1.7; margin: 10px 0; }
-    sig-row { display: flex; gap: 40px; margin-top: 32px; }
-    .sig-box { flex: 1; }
-    .sig-line { border-top: 1px solid #333; margin-top: 40px; padding-top: 4px; font-size: 11px; color: #555; }
-  </style>
-</head>
-<body>
-  <h1>Patient Informed Consent Form</h1>
-  <h2>${procedureName}</h2>
-  <p>I hereby give my informed consent to the Attending Dentist to perform the procedure.</p>
-</body>
-</html>`;
+  return `<div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; max-width: 700px; margin: 0 auto; color: #1e293b; border: 1px solid #e2e8f0; border-radius: 8px; background: #ffffff;">
+  <div style="text-align: center; margin-bottom: 24px; border-bottom: 2px solid #0891b2; padding-bottom: 16px;">
+    <h2 style="margin: 0; font-size: 22px; color: #0f172a; font-weight: 700; text-transform: uppercase;">{{clinic_name}}</h2>
+    <p style="margin: 4px 0 0 0; font-size: 13px; color: #64748b;">{{clinic_address}} | {{clinic_phone}}</p>
+  </div>
+  <h3 style="text-align: center; font-size: 18px; letter-spacing: 0.5px; text-transform: uppercase; margin-bottom: 20px; color: #0f172a; font-weight: 600;">INFORMED CONSENT FORM</h3>
+  <div style="font-size: 14px; color: #334155; margin-bottom: 24px; line-height: 1.6;">
+    <p style="margin-bottom: 12px;">I, <strong>{{patient_name}}</strong>, hereby give my consent to <strong>Dr. {{dentist_name}}</strong> and the dental team at <strong>{{clinic_name}}</strong> to perform the procedure: <strong>${procedureName}</strong> on <strong>{{date}}</strong>.</p>
+    <p style="margin-bottom: 12px;">I confirm that the procedure, expected outcomes, potential risks, and post-treatment care instructions have been thoroughly explained to me. I have had the opportunity to ask questions and all my questions have been answered to my satisfaction.</p>
+  </div>
+  <div style="display: flex; justify-content: space-between; margin-top: 60px; padding-top: 16px;">
+    <div style="border-top: 1px solid #94a3b8; width: 220px; text-align: center; padding-top: 6px; font-size: 13px; color: #475569;">
+      <strong>Patient Signature</strong><br/><span style="font-size: 11px; color: #64748b;">{{patient_name}}</span>
+    </div>
+    <div style="border-top: 1px solid #94a3b8; width: 220px; text-align: center; padding-top: 6px; font-size: 13px; color: #475569;">
+      <strong>Dentist Signature</strong><br/><span style="font-size: 11px; color: #64748b;">Dr. {{dentist_name}}</span>
+    </div>
+  </div>
+</div>`;
 }
 
 export function TreatmentClient({
@@ -182,6 +192,7 @@ export function TreatmentClient({
   hasExistingConsent,
   hasExistingXray,
   hasExistingPhoto,
+  clinicInfo,
 }: Props) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -207,6 +218,7 @@ export function TreatmentClient({
   // Confirmation modals
   const [showAddConfirm, setShowAddConfirm] = useState(false);
   const [showProceedConfirm, setShowProceedConfirm] = useState(false);
+  const [printContent, setPrintContent] = useState<string | null>(null);
 
   const selected = procedures.find((p) => p.id === selectedId);
   const computedPrice = calculateDynamicPrice(
@@ -650,15 +662,34 @@ export function TreatmentClient({
                             variant="outline"
                             className="h-7 px-2.5 text-[10px] rounded-lg border-amber-300 text-amber-800 bg-white hover:bg-amber-100"
                             onClick={() => {
-                              const html =
+                              const rawHtml =
                                 selected.consentTemplate?.content ??
                                 buildGenericConsentHtml(selected.name);
-                              const blob = new Blob([html], {
-                                type: "text/html",
-                              });
-                              const url = URL.createObjectURL(blob);
-                              window.open(url, "_blank");
-                              setTimeout(() => URL.revokeObjectURL(url), 10000);
+                              const patientName = appointment.patient
+                                ? `${appointment.patient.firstName} ${appointment.patient.lastName}`
+                                : "Patient";
+                              const dentistName =
+                                appointment.dentist?.name ??
+                                "Attending Dentist";
+                              const dateStr = formatDate(new Date());
+
+                              const finalHtml = renderDocumentTemplate(
+                                rawHtml,
+                                {
+                                  clinicName:
+                                    clinicInfo?.name || "Clinic Workspace",
+                                  clinicAddress:
+                                    clinicInfo?.address || "Clinic Address",
+                                  clinicPhone:
+                                    clinicInfo?.phone || "Clinic Phone",
+                                  patientName,
+                                  dentistName,
+                                  procedureName: selected.name,
+                                  date: dateStr,
+                                },
+                              );
+
+                              setPrintContent(finalHtml);
                             }}
                           >
                             Print Form
@@ -1110,6 +1141,34 @@ export function TreatmentClient({
               {isPending ? "Proceeding..." : "Okay"}
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Print Document Preview Modal */}
+      <Dialog
+        open={!!printContent}
+        onOpenChange={(v) => !v && setPrintContent(null)}
+      >
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader className="no-print">
+            <div className="flex items-center justify-between pr-6">
+              <DialogTitle>Document Preview</DialogTitle>
+              <Button
+                size="sm"
+                onClick={() => handlePrintDocument(printContent || "")}
+              >
+                <Printer className="h-4 w-4 mr-1" />
+                Print Document
+              </Button>
+            </div>
+          </DialogHeader>
+          <div
+            id="printable-document"
+            className="border rounded-lg p-6 bg-white shadow-sm print:border-0 print:p-0 print:shadow-none"
+            dangerouslySetInnerHTML={{
+              __html: printContent || "",
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>

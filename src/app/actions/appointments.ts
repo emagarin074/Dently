@@ -2,10 +2,20 @@
 
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
-import { sendEmail, bookingConfirmationEmail } from "@/lib/email";
+import {
+  sendClinicEmail,
+  bookingConfirmationEmail,
+  appointmentConfirmedEmail,
+  appointmentRescheduledEmail,
+  bookingDeclinedEmail,
+  appointmentCancelledEmail,
+} from "@/lib/email";
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { AppointmentStatus } from "@prisma/client";
+import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
+
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -48,6 +58,15 @@ export async function createPublicBooking(
   clinicSlug: string,
   formData: FormData,
 ) {
+  const ip = await getClientIp();
+  const rateCheck = checkRateLimit(`booking_${ip}_${clinicSlug}`, 5, 600000);
+  if (!rateCheck.success) {
+    const mins = Math.ceil(rateCheck.resetMs / 60000);
+    return {
+      error: `Too many booking attempts. Please wait ${mins} minute(s) before trying again.`,
+    };
+  }
+
   const clinic = await prisma.clinic.findUnique({
     where: { slug: clinicSlug, isActive: true },
     include: { settings: true },
@@ -79,6 +98,30 @@ export async function createPublicBooking(
     additionalConcern,
   } = parsed.data;
 
+  // ── Check for operating days ──────────────────────────────────────────────
+  const openDays = getOpenDays(clinic.settings?.operatingHours);
+  if (!isDayOpen(preferredDate, openDays)) {
+    const dayName = getDayName(new Date(preferredDate + "T00:00:00").getDay());
+    return {
+      error: `The clinic is closed on ${dayName}s. Please choose an open operating day.`,
+    };
+  }
+
+  // ── Check for blocked dates ──────────────────────────────────────────────
+  const dateToCheck = new Date(preferredDate);
+  const block = await prisma.calendarBlock.findFirst({
+    where: {
+      clinicId: clinic.id,
+      startDate: { lte: dateToCheck },
+      endDate: { gte: dateToCheck },
+    },
+  });
+  if (block) {
+    return {
+      error: `This date is unavailable (${block.title}). Please choose another date.`,
+    };
+  }
+
   try {
     const appointment = await prisma.appointment.create({
       data: {
@@ -97,7 +140,7 @@ export async function createPublicBooking(
 
     if (email) {
       try {
-        await sendEmail({
+        const emailResult = await sendClinicEmail({
           to: email,
           subject: `Booking Received – ${clinic.name}`,
           html: bookingConfirmationEmail({
@@ -106,8 +149,21 @@ export async function createPublicBooking(
             preferredDate,
             service: serviceType,
           }),
-          clinicSettings: clinic.settings ?? undefined,
+          clinicSettings: clinic.settings,
+          clinicName: clinic.name,
         });
+
+        if (!emailResult.success) {
+          console.warn(
+            "[Booking Email Skipped/Failed]:",
+            emailResult.error || emailResult.reason,
+          );
+        } else {
+          console.log(
+            "[Booking Email Success]: Sent booking confirmation email to",
+            email,
+          );
+        }
       } catch (emailError) {
         console.error("Failed to send booking confirmation email:", emailError);
       }
@@ -141,7 +197,28 @@ export async function updateAppointmentStatus(
   if (!VALID_STATUSES.includes(status)) return { error: "Invalid status." };
 
   try {
-    await prisma.appointment.update({
+    const existing = await prisma.appointment.findUnique({
+      where: { id: appointmentId, clinicId: user.clinicId },
+      include: {
+        patient: { select: { firstName: true, lastName: true, email: true } },
+        dentist: { select: { name: true } },
+        clinic: { include: { settings: true } },
+      },
+    });
+
+    if (!existing) return { error: "Appointment not found." };
+
+    if (data?.scheduledDate) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const targetDate = new Date(data.scheduledDate + "T00:00:00");
+
+      if (targetDate < today) {
+        return { error: "Cannot schedule an appointment for a past date." };
+      }
+    }
+
+    const updated = await prisma.appointment.update({
       where: { id: appointmentId, clinicId: user.clinicId },
       data: {
         status: status as AppointmentStatus,
@@ -153,6 +230,76 @@ export async function updateAppointmentStatus(
         ...(data?.cancelReason && { cancelReason: data.cancelReason }),
       },
     });
+
+    // ── Email Trigger ──────────────────────────────────────────────────────────
+    const patientEmail = existing.patient?.email || existing.bookingEmail;
+    const patientName = existing.patient
+      ? `${existing.patient.firstName} ${existing.patient.lastName}`
+      : existing.bookingName || "Patient";
+
+    if (patientEmail && existing.clinic) {
+      const clinicName = existing.clinic.name;
+      const clinicSettings = existing.clinic.settings;
+
+      if (status === "CONFIRMED" && existing.status !== "CONFIRMED") {
+        const apptDate = updated.scheduledDate || updated.preferredDate;
+        const formattedDate = new Date(apptDate).toLocaleDateString("en-US", {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        });
+
+        await sendClinicEmail({
+          to: patientEmail,
+          subject: `Appointment Confirmed – ${clinicName}`,
+          html: appointmentConfirmedEmail({
+            clinicName,
+            patientName,
+            date: formattedDate,
+            time: updated.scheduledTime || undefined,
+            dentistName: existing.dentist?.name || undefined,
+            address: existing.clinic.address || undefined,
+          }),
+          clinicSettings,
+          clinicName,
+        });
+      } else if (status === "CANCELLED" && existing.status !== "CANCELLED") {
+        const reason = data?.cancelReason || updated.cancelReason || undefined;
+
+        if (existing.status === "PENDING") {
+          // Declined Pending Request
+          await sendClinicEmail({
+            to: patientEmail,
+            subject: `Booking Request Update – ${clinicName}`,
+            html: bookingDeclinedEmail({
+              clinicName,
+              patientName,
+              reason,
+            }),
+            clinicSettings,
+            clinicName,
+          });
+        } else {
+          // Canceled Confirmed Appointment
+          await sendClinicEmail({
+            to: patientEmail,
+            subject: `Appointment Canceled – ${clinicName}`,
+            html: appointmentCancelledEmail({
+              clinicName,
+              patientName,
+              reason,
+            }),
+            clinicSettings,
+            clinicName,
+          });
+        }
+      }
+    } else {
+      console.log(
+        `[Email Skipped] No patient email for appointment ${appointmentId}`,
+      );
+    }
 
     revalidateAppointmentPaths(clinicSlug);
     return { success: true };
@@ -172,6 +319,36 @@ export async function rescheduleAppointment(
   if (!user) return { error: "Unauthorized" };
 
   try {
+    const existing = await prisma.appointment.findUnique({
+      where: { id: appointmentId, clinicId: user.clinicId },
+      include: {
+        patient: { select: { firstName: true, lastName: true, email: true } },
+        clinic: { include: { settings: true } },
+      },
+    });
+
+    if (!existing) return { error: "Appointment not found." };
+
+    // ── Past Date & Operating Days Validation ─────────────────────────────────
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const targetDate = new Date(newDate + "T00:00:00");
+
+    if (targetDate < today) {
+      return {
+        error:
+          "Cannot reschedule to a past date. Please select today or a future date.",
+      };
+    }
+
+    const openDays = getOpenDays(existing.clinic?.settings?.operatingHours);
+    if (!isDayOpen(newDate, openDays)) {
+      const dayName = getDayName(targetDate.getDay());
+      return {
+        error: `The clinic is closed on ${dayName}s. Please select an open operating day.`,
+      };
+    }
+
     await prisma.appointment.update({
       where: { id: appointmentId, clinicId: user.clinicId },
       data: {
@@ -181,6 +358,33 @@ export async function rescheduleAppointment(
         status: "CONFIRMED",
       },
     });
+
+    const patientEmail = existing.patient?.email || existing.bookingEmail;
+    const patientName = existing.patient
+      ? `${existing.patient.firstName} ${existing.patient.lastName}`
+      : existing.bookingName || "Patient";
+
+    if (patientEmail && existing.clinic) {
+      const formattedDate = new Date(newDate).toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+
+      await sendClinicEmail({
+        to: patientEmail,
+        subject: `Appointment Rescheduled – ${existing.clinic.name}`,
+        html: appointmentRescheduledEmail({
+          clinicName: existing.clinic.name,
+          patientName,
+          newDate: formattedDate,
+          newTime,
+        }),
+        clinicSettings: existing.clinic.settings,
+        clinicName: existing.clinic.name,
+      });
+    }
 
     revalidateAppointmentPaths(clinicSlug);
     return { success: true };
@@ -195,6 +399,7 @@ export async function rescheduleAppointment(
 export async function checkInAppointment(
   clinicSlug: string,
   appointmentId: string,
+  dentistId?: string | null,
 ) {
   const user = await requireAuth(clinicSlug);
   if (!user) return { error: "Unauthorized" };
@@ -216,6 +421,11 @@ export async function checkInAppointment(
       ? `${appointment.patient.firstName} ${appointment.patient.lastName}`
       : appointment.bookingName || "Walk-in Patient";
 
+    const finalDentistId =
+      dentistId !== undefined && dentistId !== "none"
+        ? dentistId
+        : appointment.dentistId;
+
     // Use transaction to atomically get queue number and create entry
     await prisma.$transaction(async (tx) => {
       const today = new Date();
@@ -231,7 +441,10 @@ export async function checkInAppointment(
 
       await tx.appointment.update({
         where: { id: appointmentId },
-        data: { status: "CHECKED_IN" },
+        data: {
+          status: "CHECKED_IN",
+          ...(finalDentistId ? { dentistId: finalDentistId } : {}),
+        },
       });
 
       await tx.queueEntry.create({
@@ -275,11 +488,50 @@ export async function createManualBooking(
   if (!preferredDate) return { error: "Date is required" };
   if (!serviceType) return { error: "Service type is required" };
 
+  const todayStr = new Date().toISOString().split("T")[0];
+  const preferredDateStr = preferredDate.split("T")[0];
+  const isToday = preferredDateStr === todayStr;
+
+  // Walk-in check-in (queue entry) is ONLY valid if preferredDate is TODAY.
+  const effectiveWalkIn = isWalkIn && isToday;
+
+  // ── Check for operating days & blocked dates for non-same-day walk-ins ────────
+  if (!effectiveWalkIn) {
+    const settings = await prisma.clinicSettings.findUnique({
+      where: { clinicId: user.clinicId },
+    });
+    const openDays = getOpenDays(settings?.operatingHours);
+
+    if (!isDayOpen(preferredDate, openDays)) {
+      const dayName = getDayName(
+        new Date(preferredDate + "T00:00:00").getDay(),
+      );
+      return {
+        error: `The clinic is closed on ${dayName}s. Please choose an open operating day.`,
+      };
+    }
+
+    const dateToCheck = new Date(preferredDate);
+    const block = await prisma.calendarBlock.findFirst({
+      where: {
+        clinicId: user.clinicId,
+        startDate: { lte: dateToCheck },
+        endDate: { gte: dateToCheck },
+      },
+    });
+    if (block) {
+      return {
+        error: `This date is unavailable (${block.title}). Please choose another date.`,
+      };
+    }
+  }
+
   try {
-    if (isWalkIn) {
-      // Walk-in: create appointment + queue entry atomically
+    if (effectiveWalkIn) {
+      // Walk-in for TODAY: create appointment + queue entry atomically
       const patientName = bookingName || "Walk-in Patient";
 
+      let queueNum = 0;
       await prisma.$transaction(async (tx) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -293,7 +545,7 @@ export async function createManualBooking(
           },
           orderBy: { queueNumber: "desc" },
         });
-        const queueNumber = (last?.queueNumber ?? 0) + 1;
+        queueNum = (last?.queueNumber ?? 0) + 1;
 
         const appointment = await tx.appointment.create({
           data: {
@@ -317,7 +569,7 @@ export async function createManualBooking(
             clinicId: user.clinicId,
             appointmentId: appointment.id,
             patientName,
-            queueNumber,
+            queueNumber: queueNum,
             status: "WAITING",
             date: new Date(),
           },
@@ -325,10 +577,10 @@ export async function createManualBooking(
       });
 
       revalidateAppointmentPaths(clinicSlug);
-      return { success: true };
+      return { success: true, queueNumber: queueNum };
     }
 
-    // Regular manual booking
+    // Regular manual scheduled booking (future date or scheduled mode)
     await prisma.appointment.create({
       data: {
         clinicId: user.clinicId,
@@ -345,6 +597,64 @@ export async function createManualBooking(
         isWalkIn: false,
       },
     });
+
+    // ── Email Trigger for Admin Manual Booking ────────────────────────────────
+    const patientRecord = patientId
+      ? await prisma.patient.findUnique({
+          where: { id: patientId },
+          select: { firstName: true, lastName: true, email: true },
+        })
+      : null;
+
+    const patientEmail =
+      patientRecord?.email || (formData.get("bookingEmail") as string | null);
+    const resolvedPatientName = patientRecord
+      ? `${patientRecord.firstName} ${patientRecord.lastName}`
+      : bookingName || "Patient";
+
+    if (patientEmail) {
+      const clinic = await prisma.clinic.findUnique({
+        where: { id: user.clinicId },
+        include: { settings: true },
+      });
+      const dentist = dentistId
+        ? await prisma.user.findUnique({
+            where: { id: dentistId },
+            select: { name: true },
+          })
+        : null;
+
+      if (clinic) {
+        const formattedDate = new Date(preferredDate).toLocaleDateString(
+          "en-US",
+          {
+            weekday: "long",
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          },
+        );
+
+        await sendClinicEmail({
+          to: patientEmail,
+          subject: `Appointment Confirmed – ${clinic.name}`,
+          html: appointmentConfirmedEmail({
+            clinicName: clinic.name,
+            patientName: resolvedPatientName,
+            date: formattedDate,
+            time: scheduledTime || undefined,
+            dentistName: dentist?.name || undefined,
+            address: clinic.address || undefined,
+          }),
+          clinicSettings: clinic.settings,
+          clinicName: clinic.name,
+        });
+      }
+    } else {
+      console.log(
+        "[Email Skipped] Manual admin booking created without patient email.",
+      );
+    }
 
     revalidateAppointmentPaths(clinicSlug);
     return { success: true };

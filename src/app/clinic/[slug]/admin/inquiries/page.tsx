@@ -12,13 +12,10 @@ export const metadata: Metadata = {
 
 export default async function InquiriesPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ page?: string }>;
 }) {
   const { slug } = await params;
-  const { page } = await searchParams;
   const user = await requireAuth(slug);
 
   if (!user) {
@@ -33,19 +30,16 @@ export default async function InquiriesPage({
     redirect("/");
   }
 
-  const take = 20;
-  const skip = (parseInt(page || "1") - 1) * take;
-
-  const { inquiries, total } = await getInquiries(clinic.id, skip, take);
+  const { inquiries, total } = await getInquiries(clinic.id, 0, 20);
 
   return (
     <>
       <AdminHeader clinicSlug={slug} title="Inquiries" userName={user.name} />
       <main className="flex-1 p-4 lg:p-6">
         <InquiriesClient
-          inquiries={inquiries}
+          initialInquiries={inquiries}
           total={total}
-          page={parseInt(page || "1")}
+          clinicId={clinic.id}
           clinicSlug={slug}
         />
       </main>

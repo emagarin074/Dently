@@ -15,8 +15,17 @@ import {
 } from "@/components/ui/select";
 import { createPublicBooking } from "@/app/actions/appointments";
 import { toast } from "sonner";
-import { MapPin, Phone, Mail, CheckCircle, Star } from "lucide-react";
+import {
+  MapPin,
+  Phone,
+  Mail,
+  CheckCircle,
+  Star,
+  AlertCircle,
+} from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { type BlockedDate } from "@/components/clinic/public-page";
+import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
 
 interface ClinicData {
   slug: string;
@@ -25,6 +34,7 @@ interface ClinicData {
   address: string | null;
   phone: string | null;
   email: string | null;
+  settings?: { brandColor?: string; operatingHours?: unknown } | null;
   procedures: {
     id: string;
     name: string;
@@ -42,6 +52,7 @@ interface Props {
   clinic: ClinicData;
   sections: SectionBlock[];
   globalStyles: GlobalStyles;
+  blockedDates?: BlockedDate[];
 }
 
 const FONT_MAP: Record<string, string> = {
@@ -68,7 +79,12 @@ const PADDING_MAP: Record<string, string> = {
   xl: "6rem 1rem",
 };
 
-export function WebsiteRenderer({ clinic, sections, globalStyles }: Props) {
+export function WebsiteRenderer({
+  clinic,
+  sections,
+  globalStyles,
+  blockedDates = [],
+}: Props) {
   const enabledSections = sections
     .filter((s) => s.enabled)
     .sort((a, b) => a.order - b.order);
@@ -92,6 +108,7 @@ export function WebsiteRenderer({ clinic, sections, globalStyles }: Props) {
           section={section}
           clinic={clinic}
           globalStyles={globalStyles}
+          blockedDates={blockedDates}
         />
       ))}
     </div>
@@ -102,10 +119,12 @@ function SectionRenderer({
   section,
   clinic,
   globalStyles,
+  blockedDates = [],
 }: {
   section: SectionBlock;
   clinic: ClinicData;
   globalStyles: GlobalStyles;
+  blockedDates?: BlockedDate[];
 }) {
   const padding = PADDING_MAP[section.style.padding || "lg"];
   const sectionStyle: React.CSSProperties = {
@@ -145,10 +164,12 @@ function SectionRenderer({
     case "booking":
       return (
         <BookingSection
+          key={section.id}
           section={section}
           clinic={clinic}
           globalStyles={globalStyles}
           style={sectionStyle}
+          blockedDates={blockedDates}
         />
       );
     case "about":
@@ -440,11 +461,13 @@ function BookingSection({
   clinic,
   globalStyles,
   style,
+  blockedDates = [],
 }: {
   section: SectionBlock;
   clinic: ClinicData;
   globalStyles: GlobalStyles;
   style: React.CSSProperties;
+  blockedDates?: BlockedDate[];
 }) {
   const c = section.content as Record<string, unknown>;
   const heading = (c.heading as string) || "Book an Appointment";
@@ -453,11 +476,42 @@ function BookingSection({
   const [submitted, setSubmitted] = useState(false);
   const [dentistId, setDentistId] = useState("");
   const [service, setService] = useState("");
+  const [dateError, setDateError] = useState<string | null>(null);
+
+  const openDays = getOpenDays(clinic.settings?.operatingHours);
+
+  function checkDateValidity(dateStr: string): string | null {
+    if (!dateStr) return null;
+    if (!isDayOpen(dateStr, openDays)) {
+      const dayName = getDayName(new Date(dateStr + "T00:00:00").getDay());
+      return `The clinic is closed on ${dayName}s. Please choose an open operating day.`;
+    }
+    const blocked = isDateBlocked(dateStr);
+    if (blocked) {
+      return `This date is unavailable (${blocked.title}). Please choose another date.`;
+    }
+    return null;
+  }
+
+  function isDateBlocked(dateStr: string): BlockedDate | null {
+    if (!dateStr) return null;
+    return (
+      blockedDates.find(
+        (b) => dateStr >= b.startDate && dateStr <= b.endDate,
+      ) ?? null
+    );
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
     const fd = new FormData(e.currentTarget);
+    const chosenDate = fd.get("preferredDate") as string;
+    const err = checkDateValidity(chosenDate);
+    if (err) {
+      setDateError(err);
+      return;
+    }
+    setLoading(true);
     fd.set(
       "preferredDentistId",
       dentistId === "no-preference" ? "" : dentistId,
@@ -540,7 +594,16 @@ function BookingSection({
                 type="date"
                 min={new Date().toISOString().split("T")[0]}
                 required
+                onChange={(e) => {
+                  setDateError(checkDateValidity(e.target.value));
+                }}
               />
+              {dateError && (
+                <p className="flex items-center gap-1.5 text-xs text-red-600">
+                  <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
+                  {dateError}
+                </p>
+              )}
             </div>
             {c.showDentistPreference !== false && clinic.users.length > 0 && (
               <div className="space-y-2">
