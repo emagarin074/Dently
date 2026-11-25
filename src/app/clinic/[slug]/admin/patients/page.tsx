@@ -1,38 +1,40 @@
-import { requireAuth } from "@/lib/auth"
-import { prisma } from "@/lib/prisma"
-import { redirect } from "next/navigation"
-import { AdminHeader } from "@/components/admin/header"
-import { PatientsClient } from "@/components/admin/patients-client"
-import type { Metadata } from "next"
+import { requireAuth } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { redirect } from "next/navigation";
+import { AdminHeader } from "@/components/admin/header";
+import { PatientsClient } from "@/components/admin/patients-client";
+import type { Metadata } from "next";
 
-export const metadata: Metadata = { title: "Patients" }
+export const metadata: Metadata = { title: "Patients" };
 
 interface Props {
-  params: Promise<{ slug: string }>
-  searchParams: Promise<{ q?: string; page?: string }>
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }
 
 export default async function PatientsPage({ params, searchParams }: Props) {
-  const { slug } = await params
-  const { q, page } = await searchParams
-  const user = await requireAuth(slug)
-  if (!user) redirect(`/clinic/${slug}/login`)
+  const { slug } = await params;
+  const { q, page } = await searchParams;
+  const user = await requireAuth(slug);
+  if (!user) redirect(`/clinic/${slug}/login`);
 
-  const take = 20
-  const skip = (parseInt(page || "1") - 1) * take
+  const take = 20;
+  const skip = (parseInt(page || "1") - 1) * take;
 
   const where = {
     clinicId: user.clinicId,
     isActive: true,
-    ...(q ? {
-      OR: [
-        { firstName: { contains: q, mode: "insensitive" as const } },
-        { lastName: { contains: q, mode: "insensitive" as const } },
-        { phone: { contains: q } },
-        { email: { contains: q, mode: "insensitive" as const } },
-      ],
-    } : {}),
-  }
+    ...(q
+      ? {
+          OR: [
+            { firstName: { contains: q, mode: "insensitive" as const } },
+            { lastName: { contains: q, mode: "insensitive" as const } },
+            { phone: { contains: q } },
+            { email: { contains: q, mode: "insensitive" as const } },
+          ],
+        }
+      : {}),
+  };
 
   const [patients, total] = await Promise.all([
     prisma.patient.findMany({
@@ -45,7 +47,7 @@ export default async function PatientsPage({ params, searchParams }: Props) {
       },
     }),
     prisma.patient.count({ where }),
-  ])
+  ]);
 
   return (
     <>
@@ -59,5 +61,5 @@ export default async function PatientsPage({ params, searchParams }: Props) {
         />
       </main>
     </>
-  )
+  );
 }

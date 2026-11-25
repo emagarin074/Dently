@@ -24,6 +24,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { sanitizeHtml } from "@/lib/sanitize";
 import { type BlockedDate } from "@/components/clinic/public-page";
 import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
 
@@ -46,12 +47,20 @@ interface ClinicData {
     category?: string | null;
   }[];
   users: { id: string; name: string; specialization: string | null }[];
+  branches?: {
+    id: string;
+    name: string;
+    address: string | null;
+    phone: string | null;
+    isPrimary: boolean;
+  }[];
 }
 
 interface Props {
   clinic: ClinicData;
   sections: SectionBlock[];
   globalStyles: GlobalStyles;
+  initialBranchId?: string;
   blockedDates?: BlockedDate[];
 }
 
@@ -83,6 +92,7 @@ export function WebsiteRenderer({
   clinic,
   sections,
   globalStyles,
+  initialBranchId,
   blockedDates = [],
 }: Props) {
   const enabledSections = sections
@@ -108,6 +118,7 @@ export function WebsiteRenderer({
           section={section}
           clinic={clinic}
           globalStyles={globalStyles}
+          initialBranchId={initialBranchId}
           blockedDates={blockedDates}
         />
       ))}
@@ -119,11 +130,13 @@ function SectionRenderer({
   section,
   clinic,
   globalStyles,
+  initialBranchId,
   blockedDates = [],
 }: {
   section: SectionBlock;
   clinic: ClinicData;
   globalStyles: GlobalStyles;
+  initialBranchId?: string;
   blockedDates?: BlockedDate[];
 }) {
   const padding = PADDING_MAP[section.style.padding || "lg"];
@@ -169,6 +182,7 @@ function SectionRenderer({
           clinic={clinic}
           globalStyles={globalStyles}
           style={sectionStyle}
+          initialBranchId={initialBranchId}
           blockedDates={blockedDates}
         />
       );
@@ -258,6 +272,8 @@ function HeroSection({
                 <img
                   src={c.logoUrl as string}
                   alt="Logo"
+                  loading="lazy"
+                  decoding="async"
                   className="h-8 w-auto max-w-[150px] object-contain"
                 />
               ) : c.logoText ? (
@@ -461,12 +477,14 @@ function BookingSection({
   clinic,
   globalStyles,
   style,
+  initialBranchId,
   blockedDates = [],
 }: {
   section: SectionBlock;
   clinic: ClinicData;
   globalStyles: GlobalStyles;
   style: React.CSSProperties;
+  initialBranchId?: string;
   blockedDates?: BlockedDate[];
 }) {
   const c = section.content as Record<string, unknown>;
@@ -475,6 +493,12 @@ function BookingSection({
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [dentistId, setDentistId] = useState("");
+  const [branchId, setBranchId] = useState(
+    initialBranchId ||
+      clinic.branches?.find((branch) => branch.isPrimary)?.id ||
+      clinic.branches?.[0]?.id ||
+      "",
+  );
   const [service, setService] = useState("");
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -512,15 +536,23 @@ function BookingSection({
       return;
     }
     setLoading(true);
-    fd.set(
-      "preferredDentistId",
-      dentistId === "no-preference" ? "" : dentistId,
-    );
-    fd.set("serviceType", service);
-    const result = await createPublicBooking(clinic.slug, fd);
-    if ("error" in result) toast.error(result.error);
-    else setSubmitted(true);
-    setLoading(false);
+    try {
+      fd.set(
+        "preferredDentistId",
+        dentistId === "no-preference" ? "" : dentistId,
+      );
+      fd.set("branchId", branchId);
+      fd.set("serviceType", service);
+      const result = await createPublicBooking(clinic.slug, fd);
+      if ("error" in result) toast.error(result.error);
+      else setSubmitted(true);
+    } catch {
+      toast.error(
+        "Network error while submitting booking request. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -585,6 +617,24 @@ function BookingSection({
                 </SelectContent>
               </Select>
             </div>
+
+            {clinic.branches && clinic.branches.length > 1 && (
+              <div className="space-y-2">
+                <Label>Preferred Branch *</Label>
+                <Select value={branchId} onValueChange={setBranchId} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a branch..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {clinic.branches.map((branch) => (
+                      <SelectItem key={branch.id} value={branch.id}>
+                        {branch.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label htmlFor="preferredDate">Preferred Date *</Label>
@@ -878,7 +928,7 @@ function CustomSection({
         {content && (
           <div
             className="prose mx-auto"
-            dangerouslySetInnerHTML={{ __html: content }}
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(content) }}
           />
         )}
       </div>

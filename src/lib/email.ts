@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { escapeHtml } from "@/lib/sanitize";
 
 export interface ClinicSmtpSettings {
   smtpHost?: string | null;
@@ -256,17 +257,22 @@ export function bookingConfirmationEmail({
   preferredDate: string;
   service: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeDate = escapeHtml(preferredDate);
+  const safeService = escapeHtml(service);
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
       <h2 style="color: #0891b2;">Booking Confirmation</h2>
-      <p>Dear ${patientName},</p>
-      <p>Your appointment request at <strong>${clinicName}</strong> has been received.</p>
+      <p>Dear ${safePatient},</p>
+      <p>Your appointment request at <strong>${safeClinic}</strong> has been received.</p>
       <ul>
-        <li><strong>Service:</strong> ${service}</li>
-        <li><strong>Preferred Date:</strong> ${preferredDate}</li>
+        <li><strong>Service:</strong> ${safeService}</li>
+        <li><strong>Preferred Date:</strong> ${safeDate}</li>
       </ul>
       <p>Our team will confirm your appointment shortly.</p>
-      <p>Thank you for choosing ${clinicName}.</p>
+      <p>Thank you for choosing ${safeClinic}.</p>
     </div>
   `;
 }
@@ -286,19 +292,26 @@ export function appointmentConfirmedEmail({
   dentistName?: string;
   address?: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeDate = escapeHtml(date);
+  const safeTime = time ? escapeHtml(time) : null;
+  const safeDentist = dentistName ? escapeHtml(dentistName) : null;
+  const safeAddress = address ? escapeHtml(address) : null;
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #0891b2; margin-top: 0;">Appointment Confirmed! 🎉</h2>
-      <p>Dear ${patientName},</p>
-      <p>Great news! Your appointment at <strong>${clinicName}</strong> has been officially confirmed.</p>
+      <p>Dear ${safePatient},</p>
+      <p>Great news! Your appointment at <strong>${safeClinic}</strong> has been officially confirmed.</p>
       <div style="background-color: #f8fafc; border-left: 4px solid #0891b2; padding: 16px; margin: 20px 0; border-radius: 4px;">
-        <p style="margin: 4px 0;"><strong>Date:</strong> ${date}</p>
-        ${time ? `<p style="margin: 4px 0;"><strong>Time:</strong> ${time}</p>` : ""}
-        ${dentistName ? `<p style="margin: 4px 0;"><strong>Attending Dentist:</strong> ${dentistName}</p>` : ""}
-        ${address ? `<p style="margin: 4px 0;"><strong>Location:</strong> ${address}</p>` : ""}
+        <p style="margin: 4px 0;"><strong>Date:</strong> ${safeDate}</p>
+        ${safeTime ? `<p style="margin: 4px 0;"><strong>Time:</strong> ${safeTime}</p>` : ""}
+        ${safeDentist ? `<p style="margin: 4px 0;"><strong>Attending Dentist:</strong> ${safeDentist}</p>` : ""}
+        ${safeAddress ? `<p style="margin: 4px 0;"><strong>Location:</strong> ${safeAddress}</p>` : ""}
       </div>
       <p>Please arrive 10 minutes prior to your scheduled time.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -314,17 +327,22 @@ export function appointmentRescheduledEmail({
   newDate: string;
   newTime?: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeNewDate = escapeHtml(newDate);
+  const safeNewTime = newTime ? escapeHtml(newTime) : null;
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #0284c7; margin-top: 0;">Appointment Rescheduled 📅</h2>
-      <p>Dear ${patientName},</p>
-      <p>Your appointment at <strong>${clinicName}</strong> has been updated to a new schedule.</p>
+      <p>Dear ${safePatient},</p>
+      <p>Your appointment at <strong>${safeClinic}</strong> has been updated to a new schedule.</p>
       <div style="background-color: #f0f9ff; border-left: 4px solid #0284c7; padding: 16px; margin: 20px 0; border-radius: 4px;">
-        <p style="margin: 4px 0;"><strong>New Date:</strong> ${newDate}</p>
-        ${newTime ? `<p style="margin: 4px 0;"><strong>New Time:</strong> ${newTime}</p>` : ""}
+        <p style="margin: 4px 0;"><strong>New Date:</strong> ${safeNewDate}</p>
+        ${safeNewTime ? `<p style="margin: 4px 0;"><strong>New Time:</strong> ${safeNewTime}</p>` : ""}
       </div>
       <p>If this new date or time does not work for you, please contact our clinic directly.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -338,15 +356,19 @@ export function bookingDeclinedEmail({
   patientName: string;
   reason?: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeReason = reason ? escapeHtml(reason) : null;
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #e11d48; margin-top: 0;">Booking Request Update</h2>
-      <p>Dear ${patientName},</p>
-      <p>Thank you for reaching out to <strong>${clinicName}</strong>.</p>
+      <p>Dear ${safePatient},</p>
+      <p>Thank you for reaching out to <strong>${safeClinic}</strong>.</p>
       <p>Unfortunately, we are unable to accept your booking request for the selected date.</p>
-      ${reason ? `<div style="background-color: #fff1f2; border-left: 4px solid #e11d48; padding: 16px; margin: 20px 0; border-radius: 4px; color: #9f1239;"><p style="margin: 0;"><strong>Reason:</strong> ${reason}</p></div>` : ""}
+      ${safeReason ? `<div style="background-color: #fff1f2; border-left: 4px solid #e11d48; padding: 16px; margin: 20px 0; border-radius: 4px; color: #9f1239;"><p style="margin: 0;"><strong>Reason:</strong> ${safeReason}</p></div>` : ""}
       <p>We invite you to submit a new request for an alternative open date or give us a call.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -360,14 +382,18 @@ export function appointmentCancelledEmail({
   patientName: string;
   reason?: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeReason = reason ? escapeHtml(reason) : null;
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #dc2626; margin-top: 0;">Confirmed Appointment Canceled</h2>
-      <p>Dear ${patientName},</p>
-      <p>This email is to notify you that your scheduled appointment at <strong>${clinicName}</strong> has been canceled.</p>
-      ${reason ? `<div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; margin: 20px 0; border-radius: 4px; color: #991b1b;"><p style="margin: 0;"><strong>Cancellation Reason:</strong> ${reason}</p></div>` : ""}
+      <p>Dear ${safePatient},</p>
+      <p>This email is to notify you that your scheduled appointment at <strong>${safeClinic}</strong> has been canceled.</p>
+      ${safeReason ? `<div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 16px; margin: 20px 0; border-radius: 4px; color: #991b1b;"><p style="margin: 0;"><strong>Cancellation Reason:</strong> ${safeReason}</p></div>` : ""}
       <p>If you wish to reschedule, please visit our clinic booking page or call our reception desk.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -379,13 +405,16 @@ export function inquiryReceivedEmail({
   clinicName: string;
   patientName: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #0891b2; margin-top: 0;">Thank You for Contacting Us!</h2>
-      <p>Dear ${patientName},</p>
-      <p>We have received your message sent to <strong>${clinicName}</strong>.</p>
+      <p>Dear ${safePatient},</p>
+      <p>We have received your message sent to <strong>${safeClinic}</strong>.</p>
       <p>Our team is reviewing your message and will reply to you as soon as possible.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Best regards,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Best regards,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -401,19 +430,24 @@ export function inquiryReplyEmail({
   originalMessage: string;
   replyMessage: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeReply = escapeHtml(replyMessage);
+  const safeOriginal = escapeHtml(originalMessage);
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
-      <h2 style="color: #0891b2; margin-top: 0;">Response from ${clinicName}</h2>
-      <p>Dear ${patientName},</p>
+      <h2 style="color: #0891b2; margin-top: 0;">Response from ${safeClinic}</h2>
+      <p>Dear ${safePatient},</p>
       <div style="background-color: #f8fafc; border-left: 4px solid #0891b2; padding: 16px; margin: 20px 0; border-radius: 4px; white-space: pre-wrap;">
-        ${replyMessage}
+        ${safeReply}
       </div>
       <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
       <p style="color: #64748b; font-size: 13px; font-weight: bold; margin-bottom: 8px;">Your Original Message:</p>
       <blockquote style="margin: 0; padding-left: 12px; border-left: 2px solid #cbd5e1; color: #64748b; font-size: 13px; font-style: italic; white-space: pre-wrap;">
-        "${originalMessage}"
+        "${safeOriginal}"
       </blockquote>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -433,19 +467,25 @@ export function installmentReminderEmail({
   amount: string;
   remainingBalance?: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeDueDate = escapeHtml(dueDate);
+  const safeAmount = escapeHtml(amount);
+  const safeRemaining = remainingBalance ? escapeHtml(remainingBalance) : null;
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #0891b2; margin-top: 0;">Upcoming Installment Payment Reminder 💳</h2>
-      <p>Dear ${patientName},</p>
-      <p>This is a friendly reminder regarding your upcoming treatment installment payment for <strong>${clinicName}</strong>.</p>
+      <p>Dear ${safePatient},</p>
+      <p>This is a friendly reminder regarding your upcoming treatment installment payment for <strong>${safeClinic}</strong>.</p>
       <div style="background-color: #f8fafc; border-left: 4px solid #0891b2; padding: 16px; margin: 20px 0; border-radius: 4px;">
         <p style="margin: 4px 0;"><strong>Installment #:</strong> ${installmentNumber}</p>
-        <p style="margin: 4px 0;"><strong>Amount Due:</strong> <span style="font-size: 18px; font-weight: bold; color: #0f172a;">${amount}</span></p>
-        <p style="margin: 4px 0;"><strong>Due Date:</strong> ${dueDate}</p>
-        ${remainingBalance ? `<p style="margin: 4px 0; color: #64748b;"><strong>Remaining Plan Balance:</strong> ${remainingBalance}</p>` : ""}
+        <p style="margin: 4px 0;"><strong>Amount Due:</strong> <span style="font-size: 18px; font-weight: bold; color: #0f172a;">${safeAmount}</span></p>
+        <p style="margin: 4px 0;"><strong>Due Date:</strong> ${safeDueDate}</p>
+        ${safeRemaining ? `<p style="margin: 4px 0; color: #64748b;"><strong>Remaining Plan Balance:</strong> ${safeRemaining}</p>` : ""}
       </div>
       <p>Please visit our clinic on or before the due date to make your payment, or contact our reception desk if you have any questions.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Warm regards,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -463,17 +503,22 @@ export function installmentOverdueEmail({
   dueDate: string;
   amount: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeDueDate = escapeHtml(dueDate);
+  const safeAmount = escapeHtml(amount);
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #e11d48; margin-top: 0;">Payment Overdue Notice ⚠️</h2>
-      <p>Dear ${patientName},</p>
-      <p>According to our records, installment payment #${installmentNumber} for <strong>${clinicName}</strong> is now past due.</p>
+      <p>Dear ${safePatient},</p>
+      <p>According to our records, installment payment #${installmentNumber} for <strong>${safeClinic}</strong> is now past due.</p>
       <div style="background-color: #fff1f2; border-left: 4px solid #e11d48; padding: 16px; margin: 20px 0; border-radius: 4px; color: #9f1239;">
-        <p style="margin: 4px 0;"><strong>Overdue Amount:</strong> <span style="font-size: 18px; font-weight: bold;">${amount}</span></p>
-        <p style="margin: 4px 0;"><strong>Original Due Date:</strong> ${dueDate}</p>
+        <p style="margin: 4px 0;"><strong>Overdue Amount:</strong> <span style="font-size: 18px; font-weight: bold;">${safeAmount}</span></p>
+        <p style="margin: 4px 0;"><strong>Original Due Date:</strong> ${safeDueDate}</p>
       </div>
       <p>Please settle this payment as soon as possible or contact our clinic to arrange a suitable payment schedule.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${clinicName} Team</strong></p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Sincerely,<br><strong>${safeClinic} Team</strong></p>
     </div>
   `;
 }
@@ -493,19 +538,60 @@ export function installmentReceiptEmail({
   paymentMethod: string;
   remainingBalance: string;
 }) {
+  const safeClinic = escapeHtml(clinicName);
+  const safePatient = escapeHtml(patientName);
+  const safeAmount = escapeHtml(amountPaid);
+  const safeMethod = escapeHtml(paymentMethod);
+  const safeRemaining = escapeHtml(remainingBalance);
+
   return `
     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px;">
       <h2 style="color: #10b981; margin-top: 0;">Installment Payment Received ✅</h2>
-      <p>Dear ${patientName},</p>
-      <p>Thank you! We have received your installment payment at <strong>${clinicName}</strong>.</p>
+      <p>Dear ${safePatient},</p>
+      <p>Thank you! We have received your installment payment at <strong>${safeClinic}</strong>.</p>
       <div style="background-color: #ecfdf5; border-left: 4px solid #10b981; padding: 16px; margin: 20px 0; border-radius: 4px; color: #065f46;">
         <p style="margin: 4px 0;"><strong>Installment #:</strong> ${installmentNumber}</p>
-        <p style="margin: 4px 0;"><strong>Amount Paid:</strong> <span style="font-size: 18px; font-weight: bold;">${amountPaid}</span></p>
-        <p style="margin: 4px 0;"><strong>Payment Method:</strong> ${paymentMethod}</p>
-        <p style="margin: 4px 0;"><strong>Remaining Plan Balance:</strong> ${remainingBalance}</p>
+        <p style="margin: 4px 0;"><strong>Amount Paid:</strong> <span style="font-size: 18px; font-weight: bold;">${safeAmount}</span></p>
+        <p style="margin: 4px 0;"><strong>Payment Method:</strong> ${safeMethod}</p>
+        <p style="margin: 4px 0;"><strong>Remaining Plan Balance:</strong> ${safeRemaining}</p>
       </div>
-      <p>Thank you for choosing ${clinicName}.</p>
-      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Best regards,<br><strong>${clinicName} Team</strong></p>
+      <p>Thank you for choosing ${safeClinic}.</p>
+      <p style="color: #64748b; font-size: 14px; margin-top: 24px;">Best regards,<br><strong>${safeClinic} Team</strong></p>
+    </div>
+  `;
+}
+
+export function passwordResetEmail({
+  recipientName,
+  resetUrl,
+}: {
+  recipientName: string;
+  resetUrl: string;
+}) {
+  const safeRecipient = escapeHtml(recipientName);
+  // Ensure resetUrl is a safe HTTP/HTTPS URL
+  const safeUrl =
+    resetUrl.startsWith("http://") || resetUrl.startsWith("https://")
+      ? escapeHtml(resetUrl)
+      : "#";
+
+  return `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 560px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; padding: 32px; background-color: #ffffff;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #0f172a; font-size: 24px; font-weight: 700; margin: 0;">Dently</h1>
+        <p style="color: #64748b; font-size: 14px; margin-top: 4px;">Dental Practice Management Platform</p>
+      </div>
+      <div style="border-top: 1px solid #f1f5f9; padding-top: 24px;">
+        <h2 style="color: #1e293b; font-size: 18px; font-weight: 600; margin-top: 0;">Password Reset Request</h2>
+        <p style="color: #334155; font-size: 15px; line-height: 1.5;">Hi ${safeRecipient},</p>
+        <p style="color: #334155; font-size: 15px; line-height: 1.5;">We received a request to reset your password for your Dently account. Click the button below to set a new password:</p>
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${safeUrl}" style="background-color: #0284c7; color: #ffffff; padding: 12px 28px; text-decoration: none; font-weight: 600; font-size: 15px; border-radius: 8px; display: inline-block;">Reset Password</a>
+        </div>
+        <p style="color: #64748b; font-size: 13px; line-height: 1.5;">This link will expire in <strong>1 hour</strong>. If you did not request a password reset, you can safely ignore this email. Your password will remain unchanged.</p>
+        <hr style="border: none; border-top: 1px solid #f1f5f9; margin: 24px 0;" />
+        <p style="color: #94a3b8; font-size: 12px; line-height: 1.4; word-break: break-all;">If the button above does not work, copy and paste this URL into your browser:<br /><a href="${safeUrl}" style="color: #0284c7;">${safeUrl}</a></p>
+      </div>
     </div>
   `;
 }

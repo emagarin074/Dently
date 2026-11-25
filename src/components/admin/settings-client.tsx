@@ -27,6 +27,10 @@ import {
   CheckCircle2,
   Send,
   Loader2,
+  ArrowRight,
+  Zap,
+  Layers,
+  Sparkles,
 } from "lucide-react";
 import { format } from "date-fns";
 import {
@@ -46,6 +50,7 @@ interface Clinic {
   settings: {
     brandColor: string;
     appointmentLeadDays: number;
+    queueWorkflow?: "FULL_WORKFLOW" | "SIMPLE_QUEUE" | "DIRECT_TREATMENT";
     maxBookingsPerDay: number | null;
     autoConfirmBookings: boolean;
     revenueFormula: string | null;
@@ -63,11 +68,16 @@ interface Clinic {
 export function SettingsClient({
   clinic,
   clinicSlug,
+  defaultTab = "info",
 }: {
   clinic: Clinic;
   clinicSlug: string;
+  defaultTab?: string;
 }) {
   const [loading, setLoading] = useState(false);
+  const [queueWorkflow, setQueueWorkflow] = useState<
+    "FULL_WORKFLOW" | "SIMPLE_QUEUE" | "DIRECT_TREATMENT"
+  >(clinic.settings?.queueWorkflow ?? "FULL_WORKFLOW");
   const [autoConfirm, setAutoConfirm] = useState(
     clinic.settings?.autoConfirmBookings ?? false,
   );
@@ -83,13 +93,20 @@ export function SettingsClient({
     if (!form) return;
 
     setTestingSmtp(true);
-    const result = await testClinicSmtp(clinicSlug, new FormData(form));
-    if ("error" in result && result.error) {
-      toast.error(result.error);
-    } else if ("message" in result && result.message) {
-      toast.success(result.message);
+    try {
+      const result = await testClinicSmtp(clinicSlug, new FormData(form));
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+      } else if ("message" in result && result.message) {
+        toast.success(result.message);
+      }
+    } catch {
+      toast.error(
+        "Network error while testing SMTP connection. Please try again.",
+      );
+    } finally {
+      setTestingSmtp(false);
     }
-    setTestingSmtp(false);
   }
 
   const isSmtpConfigured = Boolean(
@@ -111,30 +128,42 @@ export function SettingsClient({
   async function handleInfoSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    const result = await updateClinicInfo(
-      clinicSlug,
-      new FormData(e.currentTarget),
-    );
-    if ("error" in result) toast.error(result.error);
-    else {
-      toast.success("Clinic info updated");
-      router.refresh();
+    try {
+      const result = await updateClinicInfo(
+        clinicSlug,
+        new FormData(e.currentTarget),
+      );
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success("Clinic info updated");
+        router.refresh();
+      }
+    } catch {
+      toast.error(
+        "Network error while saving clinic information. Please try again.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleSettingsSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    const fd = new FormData(e.currentTarget);
-    fd.set("autoConfirmBookings", String(autoConfirm));
-    const result = await updateClinicSettings(clinicSlug, fd);
-    if ("error" in result) toast.error(result.error);
-    else {
-      toast.success("Settings saved");
-      router.refresh();
+    try {
+      const fd = new FormData(e.currentTarget);
+      fd.set("autoConfirmBookings", String(autoConfirm));
+      const result = await updateClinicSettings(clinicSlug, fd);
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success("Settings saved");
+        router.refresh();
+      }
+    } catch {
+      toast.error("Network error while saving settings. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleSaveOperatingDays() {
@@ -142,19 +171,50 @@ export function SettingsClient({
     setConflictError(null);
     setConflictList([]);
 
-    const result = await updateOperatingDays(clinicSlug, selectedOpenDays);
+    try {
+      const result = await updateOperatingDays(clinicSlug, selectedOpenDays);
 
-    if ("error" in result && result.error) {
-      setConflictError(result.error);
-      if (result.conflicts) {
-        setConflictList(result.conflicts);
+      if ("error" in result && result.error) {
+        setConflictError(result.error);
+        if (result.conflicts) {
+          setConflictList(result.conflicts);
+        }
+        toast.error("Cannot update operating days");
+      } else {
+        toast.success("Operating days saved");
+        router.refresh();
       }
-      toast.error("Cannot update operating days");
-    } else {
-      toast.success("Operating days saved");
-      router.refresh();
+    } catch {
+      toast.error(
+        "Network error while updating operating days. Please try again.",
+      );
+    } finally {
+      setOpDaysLoading(false);
     }
-    setOpDaysLoading(false);
+  }
+
+  async function handleQueueWorkflowSubmit(
+    e: React.FormEvent<HTMLFormElement>,
+  ) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const fd = new FormData(e.currentTarget);
+      fd.set("queueWorkflow", queueWorkflow);
+      const result = await updateClinicSettings(clinicSlug, fd);
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        toast.success("Queue workflow updated successfully");
+        router.refresh();
+      }
+    } catch {
+      toast.error(
+        "Network error while updating queue workflow. Please try again.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }
 
   const toggleDay = (dayId: number) => {
@@ -166,10 +226,11 @@ export function SettingsClient({
   };
 
   return (
-    <Tabs defaultValue="info" className="space-y-4">
+    <Tabs defaultValue={defaultTab} className="space-y-4">
       <TabsList>
         <TabsTrigger value="info">Clinic Info</TabsTrigger>
         <TabsTrigger value="booking">Booking & Operating Days</TabsTrigger>
+        <TabsTrigger value="queue">Queue Workflow</TabsTrigger>
         <TabsTrigger value="email">Email (SMTP)</TabsTrigger>
         <TabsTrigger value="revenue">Revenue</TabsTrigger>
       </TabsList>
@@ -234,23 +295,48 @@ export function SettingsClient({
 
               {/* Document Letterhead Preview Card */}
               <div className="mt-6 pt-4 border-t space-y-3">
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <FileText className="h-4 w-4 text-primary" />
-                  Document Letterhead Header Preview
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Document Letterhead Header Preview
+                  </div>
+                  <span className="text-[10px] font-semibold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200/60">
+                    Live Document Header
+                  </span>
                 </div>
                 <p className="text-xs text-slate-500">
-                  This letterhead header automatically prints on top of all
-                  Consent Forms, Prescriptions, and Medical Certificates.
+                  This letterhead prints at the top of all Consent Forms,
+                  Prescriptions, and Medical Certificates.
                 </p>
-                <div className="border rounded-xl p-5 bg-slate-50/50 text-center max-w-md mx-auto shadow-sm">
-                  <h2 className="text-lg font-bold text-slate-900 uppercase tracking-wide">
-                    {clinicName || "Clinic Name"}
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {clinicAddress || "Clinic Address"} |{" "}
-                    {clinicPhone || "Clinic Phone"}
-                  </p>
-                  <div className="border-b-2 border-cyan-600 mt-3" />
+                <div className="border border-slate-200/90 rounded-2xl p-5 bg-white shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-900 text-white flex items-center justify-center text-lg font-bold shadow-xs shrink-0">
+                        ✚
+                      </div>
+                      <div>
+                        <h2 className="text-base font-extrabold text-slate-900 uppercase tracking-tight leading-tight">
+                          {clinicName || "Clinic Name"}
+                        </h2>
+                        <p className="text-[10px] font-bold text-sky-600 tracking-wider uppercase mt-0.5">
+                          Dental Clinic & Oral Healthcare Practice
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-left sm:text-right text-xs text-slate-600 leading-relaxed font-sans">
+                      <p className="font-semibold text-slate-800">
+                        {clinicAddress || "Clinic Address"}
+                      </p>
+                      <p className="text-slate-500 text-[11px] mt-0.5">
+                        Tel: {clinicPhone || "+63 (2) 8888-DENT"}
+                      </p>
+                      <p className="text-slate-400 text-[11px]">
+                        {clinic.email || "clinic@dently.app"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4 border-b-2 border-slate-900" />
+                  <div className="mt-0.5 border-b border-sky-600" />
                 </div>
               </div>
 
@@ -415,6 +501,230 @@ export function SettingsClient({
               </div>
               <Button type="submit" disabled={loading}>
                 {loading ? "Saving..." : "Save Settings"}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      {/* Queue Workflow Settings */}
+      <TabsContent value="queue">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Layers className="h-4 w-4 text-primary" />
+              Queue & Visit Workflow
+            </CardTitle>
+            <p className="text-xs text-muted-foreground mt-1">
+              Select the patient flow that matches your clinic&apos;s daily
+              operational setup.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleQueueWorkflowSubmit} className="space-y-6">
+              <input type="hidden" name="queueWorkflow" value={queueWorkflow} />
+
+              <div className="grid grid-cols-1 gap-4">
+                {/* Option 1: Full Workflow */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setQueueWorkflow("FULL_WORKFLOW")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ")
+                      setQueueWorkflow("FULL_WORKFLOW");
+                  }}
+                  className={`p-4 rounded-xl border text-left cursor-pointer transition-all relative ${
+                    queueWorkflow === "FULL_WORKFLOW"
+                      ? "border-primary bg-primary/[0.03] ring-2 ring-primary/20 shadow-sm"
+                      : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-slate-900">
+                          Full Workflow (5 Stages)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                          Standard
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Comprehensive multi-stage flow with dedicated
+                        consultation and treatment rooms.
+                      </p>
+                    </div>
+                    <div
+                      className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors ${
+                        queueWorkflow === "FULL_WORKFLOW"
+                          ? "border-primary bg-primary text-white"
+                          : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      {queueWorkflow === "FULL_WORKFLOW" && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Flow pipeline */}
+                  <div className="mt-3.5 flex items-center flex-wrap gap-1.5 text-xs select-none">
+                    <span className="px-2.5 py-1 rounded-md bg-yellow-100 text-yellow-800 font-medium">
+                      Waiting
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-blue-100 text-blue-800 font-medium">
+                      In Consultation
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-purple-100 text-purple-800 font-medium">
+                      In Treatment
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-orange-100 text-orange-800 font-medium">
+                      For Payment
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-green-100 text-green-800 font-medium">
+                      Completed
+                    </span>
+                  </div>
+                </div>
+
+                {/* Option 2: Simple Queue */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setQueueWorkflow("SIMPLE_QUEUE")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ")
+                      setQueueWorkflow("SIMPLE_QUEUE");
+                  }}
+                  className={`p-4 rounded-xl border text-left cursor-pointer transition-all relative ${
+                    queueWorkflow === "SIMPLE_QUEUE"
+                      ? "border-primary bg-primary/[0.03] ring-2 ring-primary/20 shadow-sm"
+                      : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-slate-900">
+                          Simple Queue (Queue & Treatment)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1">
+                          <Sparkles className="h-2.5 w-2.5" /> Recommended
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Patients check in to the queue and transition directly
+                        into treatment when called (skips consultation).
+                      </p>
+                    </div>
+                    <div
+                      className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors ${
+                        queueWorkflow === "SIMPLE_QUEUE"
+                          ? "border-primary bg-primary text-white"
+                          : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      {queueWorkflow === "SIMPLE_QUEUE" && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Flow pipeline */}
+                  <div className="mt-3.5 flex items-center flex-wrap gap-1.5 text-xs select-none">
+                    <span className="px-2.5 py-1 rounded-md bg-yellow-100 text-yellow-800 font-medium">
+                      Queue (Waiting)
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-purple-100 text-purple-800 font-medium">
+                      In Treatment
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-orange-100 text-orange-800 font-medium">
+                      For Payment
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-green-100 text-green-800 font-medium">
+                      Completed
+                    </span>
+                  </div>
+                </div>
+
+                {/* Option 3: Direct to Treatment */}
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setQueueWorkflow("DIRECT_TREATMENT")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ")
+                      setQueueWorkflow("DIRECT_TREATMENT");
+                  }}
+                  className={`p-4 rounded-xl border text-left cursor-pointer transition-all relative ${
+                    queueWorkflow === "DIRECT_TREATMENT"
+                      ? "border-primary bg-primary/[0.03] ring-2 ring-primary/20 shadow-sm"
+                      : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-slate-900">
+                          Direct to Treatment (Auto Check-In)
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 flex items-center gap-1">
+                          <Zap className="h-2.5 w-2.5" /> Express
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Checking in automatically places patient directly in
+                        treatment chair (bypasses waiting room queue).
+                      </p>
+                    </div>
+                    <div
+                      className={`h-5 w-5 rounded-full flex items-center justify-center border transition-colors ${
+                        queueWorkflow === "DIRECT_TREATMENT"
+                          ? "border-primary bg-primary text-white"
+                          : "border-slate-300 bg-white"
+                      }`}
+                    >
+                      {queueWorkflow === "DIRECT_TREATMENT" && (
+                        <div className="h-2 w-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Flow pipeline */}
+                  <div className="mt-3.5 flex items-center flex-wrap gap-1.5 text-xs select-none">
+                    <span className="px-2.5 py-1 rounded-md bg-purple-100 text-purple-800 font-medium">
+                      In Treatment (Direct)
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-orange-100 text-orange-800 font-medium">
+                      For Payment
+                    </span>
+                    <ArrowRight className="h-3 w-3 text-slate-400" />
+                    <span className="px-2.5 py-1 rounded-md bg-green-100 text-green-800 font-medium">
+                      Completed
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200/70 rounded-lg text-xs text-slate-600 flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+                <span>
+                  Workflow updates apply immediately to the Appointments Queue
+                  board and future patient check-ins.
+                </span>
+              </div>
+
+              <Button type="submit" disabled={loading}>
+                {loading ? "Saving Workflow..." : "Save Queue Workflow"}
               </Button>
             </form>
           </CardContent>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table,
@@ -13,7 +14,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatCurrency } from "@/lib/utils";
-import { FileText, Search, ShieldCheck } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, ShieldCheck } from "lucide-react";
 
 export interface LedgerRecordUI {
   id: string;
@@ -39,12 +40,16 @@ interface Props {
 
 export function CompensationLedgerClient({ ledgers }: Props) {
   const [searchTerm, setSearchTerm] = useState("");
+  const [page, setPage] = useState(1);
 
   const filtered = ledgers.filter(
     (l) =>
       l.procedureName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (l.program?.name || "").toLowerCase().includes(searchTerm.toLowerCase()),
   );
+  const pageSize = 10;
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const visibleLedgers = filtered.slice((page - 1) * pageSize, page * pageSize);
 
   return (
     <Card className="border-slate-200">
@@ -58,7 +63,10 @@ export function CompensationLedgerClient({ ledgers }: Props) {
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
           <Input
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setPage(1);
+            }}
             placeholder="Search procedure or program..."
             className="pl-8 h-8 text-xs bg-slate-50 border-slate-200 rounded-lg"
           />
@@ -95,7 +103,7 @@ export function CompensationLedgerClient({ ledgers }: Props) {
             </TableHeader>
 
             <TableBody>
-              {filtered.map((item) => (
+              {visibleLedgers.map((item) => (
                 <TableRow key={item.id} className="hover:bg-slate-50/50">
                   <TableCell className="font-medium text-slate-700">
                     {new Date(item.createdAt).toLocaleDateString("en-US", {
@@ -146,6 +154,33 @@ export function CompensationLedgerClient({ ledgers }: Props) {
               ))}
             </TableBody>
           </Table>
+        )}
+        {filtered.length > 0 && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
+            <span className="text-xs text-slate-500">
+              Page {page} of {totalPages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 1}
+                onClick={() => setPage((value) => Math.max(1, value - 1))}
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === totalPages}
+                onClick={() =>
+                  setPage((value) => Math.min(totalPages, value + 1))
+                }
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

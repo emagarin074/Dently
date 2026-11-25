@@ -14,6 +14,9 @@ import { z } from "zod";
 
 import { Gender } from "@prisma/client";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { isSuperAdminEmail } from "@/lib/super-admin";
+import { buildDefaultProcedureData } from "@/lib/default-procedures";
+import { getDefaultBranchLimitForPlan } from "@/lib/plan-entitlements";
 
 const registerUserSchema = z
   .object({
@@ -160,12 +163,21 @@ export async function registerClinicForUser(formData: FormData) {
     if (existing) slug = slug + "-" + Date.now().toString(36);
 
     const result = await prisma.$transaction(async (tx) => {
+      const trialExpiry = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
       const clinic = await tx.clinic.create({
         data: {
           name: clinicName,
           slug,
           plan: plan || "Starter",
+          branchLimit: getDefaultBranchLimitForPlan(plan),
+          planExpiresAt: trialExpiry,
+          planNotes: "14-day free trial on signup",
           settings: { create: {} },
+          procedures: {
+            create: buildDefaultProcedureData("").map(
+              ({ clinicId, ...procedure }) => procedure,
+            ),
+          },
         },
       });
 
@@ -174,6 +186,24 @@ export async function registerClinicForUser(formData: FormData) {
         data: {
           clinicId: clinic.id,
           role: "DENTIST_ADMIN",
+        },
+      });
+
+      const branch = await tx.branch.create({
+        data: {
+          clinicId: clinic.id,
+          name: "Main Branch",
+          slug: "main",
+          isPrimary: true,
+        },
+      });
+
+      await tx.userBranchAssignment.create({
+        data: {
+          clinicId: clinic.id,
+          branchId: branch.id,
+          userId: currentUser.id,
+          isPrimary: true,
         },
       });
 
@@ -194,7 +224,7 @@ export async function registerClinicForUser(formData: FormData) {
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
-  clinicSlug: z.string().min(1),
+  clinicSlug: z.string().optional(),
 });
 
 export async function loginUser(formData: FormData) {
@@ -221,15 +251,14 @@ export async function loginUser(formData: FormData) {
   let redirectPath: string | null = null;
 
   try {
-    const clinic = await prisma.clinic.findUnique({
-      where: { slug: clinicSlug },
-    });
-    if (!clinic) return { error: "Clinic not found." };
-
     const user = await prisma.user.findUnique({
-      where: { email_clinicId: { email, clinicId: clinic.id } },
+      where: { email },
+      include: { clinic: true },
     });
     if (!user || !user.isActive) return { error: "Invalid email or password." };
+    if (clinicSlug && user.clinic?.slug !== clinicSlug) {
+      return { error: "Invalid email or password." };
+    }
 
     const valid = await verifyPassword(password, user.passwordHash);
     if (!valid) return { error: "Invalid email or password." };
@@ -245,7 +274,7 @@ export async function loginUser(formData: FormData) {
       path: "/",
     });
 
-    redirectPath = `/clinic/${clinicSlug}/admin`;
+    redirectPath = getPostLoginRedirect(user);
   } catch (error: unknown) {
     console.error("Login error:", error);
     return { error: "Something went wrong. Please try again." };
@@ -256,12 +285,21 @@ export async function loginUser(formData: FormData) {
   }
 }
 
+function getPostLoginRedirect(user: {
+  email: string;
+  clinic: { slug: string } | null;
+}) {
+  if (isSuperAdminEmail(user.email)) return "/platform/clinics";
+  if (user.clinic) return `/clinic/${user.clinic.slug}/admin`;
+  return "/clinic/new";
+}
+
 export async function logoutUser(clinicSlug: string) {
   const cookieStore = await cookies();
   const token = cookieStore.get("dently_session")?.value;
   if (token) await deleteSession(token);
   cookieStore.delete("dently_session");
-  redirect(`/clinic/${clinicSlug}/login`);
+  redirect(`/login?clinic=${clinicSlug}`);
 }
 
 // Global login for SaaS (login page at /login)
@@ -283,27 +321,17 @@ export async function loginGlobal(formData: FormData) {
   let redirectPath: string | null = null;
 
   try {
-    // Find ALL users with this email (handles multi-tenant correctly)
-    const users = await prisma.user.findMany({
-      where: { email, isActive: true },
+    const user = await prisma.user.findUnique({
+      where: { email },
       include: { clinic: true },
     });
 
-    if (users.length === 0) return { error: "Invalid email or password." };
+    if (!user || !user.isActive) return { error: "Invalid email or password." };
 
-    // Try to verify password against each matching user
-    let matchedUser: (typeof users)[0] | null = null;
-    for (const user of users) {
-      const valid = await verifyPassword(password, user.passwordHash);
-      if (valid) {
-        matchedUser = user;
-        break;
-      }
-    }
+    const valid = await verifyPassword(password, user.passwordHash);
+    if (!valid) return { error: "Invalid email or password." };
 
-    if (!matchedUser) return { error: "Invalid email or password." };
-
-    const token = await createSession(matchedUser.id);
+    const token = await createSession(user.id);
 
     const cookieStore = await cookies();
     cookieStore.set("dently_session", token, {
@@ -314,7 +342,7 @@ export async function loginGlobal(formData: FormData) {
       path: "/",
     });
 
-    redirectPath = "/";
+    redirectPath = getPostLoginRedirect(user);
   } catch (error: unknown) {
     console.error("Login error:", error);
     return { error: "Something went wrong. Please try again." };

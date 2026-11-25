@@ -11,6 +11,7 @@ import {
   inquiryReplyEmail,
 } from "@/lib/email";
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
+import { enqueueClinicEmail } from "@/lib/queue/bull-queue";
 
 const inquirySchema = z
   .object({
@@ -67,20 +68,18 @@ export async function createInquiry(clinicSlug: string, formData: FormData) {
     });
 
     if (parsed.data.email) {
-      try {
-        await sendClinicEmail({
-          to: parsed.data.email,
-          subject: `Thank You for Contacting ${clinic.name}`,
-          html: inquiryReceivedEmail({
-            clinicName: clinic.name,
-            patientName: parsed.data.name,
-          }),
-          clinicSettings: clinic.settings,
+      enqueueClinicEmail({
+        clinicId: clinic.id,
+        to: parsed.data.email,
+        subject: `Thank You for Contacting ${clinic.name}`,
+        html: inquiryReceivedEmail({
           clinicName: clinic.name,
-        });
-      } catch (emailErr) {
-        console.error("Failed to send inquiry receipt email:", emailErr);
-      }
+          patientName: parsed.data.name,
+        }),
+        templateType: "INQUIRY_RECEIPT",
+      }).catch((emailErr) => {
+        console.warn("[Inquiry Email Enqueue Warning]:", emailErr);
+      });
     }
 
     return { success: true };
@@ -152,31 +151,42 @@ export async function replyToInquiry(
 }
 
 export async function getInquiries(
-  clinicId: string,
+  clinicSlug: string,
   skip: number = 0,
   take: number = 20,
 ) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { inquiries: [], total: 0, error: "Unauthorized" };
+
   const [inquiries, total] = await Promise.all([
     prisma.inquiry.findMany({
-      where: { clinicId },
+      where: { clinicId: user.clinicId },
       orderBy: { createdAt: "desc" },
       skip,
       take,
     }),
-    prisma.inquiry.count({ where: { clinicId } }),
+    prisma.inquiry.count({ where: { clinicId: user.clinicId } }),
   ]);
 
   return { inquiries, total };
 }
 
-export async function markInquiryRead(inquiryId: string) {
+export async function markInquiryRead(clinicSlug: string, inquiryId: string) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
   try {
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: inquiryId, clinicId: user.clinicId },
+    });
+    if (!inquiry) return { error: "Inquiry not found." };
+
     await prisma.inquiry.update({
       where: { id: inquiryId },
       data: { isRead: true },
     });
 
-    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    revalidatePath(`/clinic/${clinicSlug}/admin/inquiries`);
     return { success: true };
   } catch (error) {
     console.error("Mark inquiry read error:", error);
@@ -184,13 +194,21 @@ export async function markInquiryRead(inquiryId: string) {
   }
 }
 
-export async function deleteInquiry(inquiryId: string) {
+export async function deleteInquiry(clinicSlug: string, inquiryId: string) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
   try {
+    const inquiry = await prisma.inquiry.findFirst({
+      where: { id: inquiryId, clinicId: user.clinicId },
+    });
+    if (!inquiry) return { error: "Inquiry not found." };
+
     await prisma.inquiry.delete({
       where: { id: inquiryId },
     });
 
-    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    revalidatePath(`/clinic/${clinicSlug}/admin/inquiries`);
     return { success: true };
   } catch (error) {
     console.error("Delete inquiry error:", error);
@@ -198,14 +216,20 @@ export async function deleteInquiry(inquiryId: string) {
   }
 }
 
-export async function bulkMarkInquiriesRead(inquiryIds: string[]) {
+export async function bulkMarkInquiriesRead(
+  clinicSlug: string,
+  inquiryIds: string[],
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
   try {
     await prisma.inquiry.updateMany({
-      where: { id: { in: inquiryIds } },
+      where: { id: { in: inquiryIds }, clinicId: user.clinicId },
       data: { isRead: true },
     });
 
-    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    revalidatePath(`/clinic/${clinicSlug}/admin/inquiries`);
     return { success: true };
   } catch (error) {
     console.error("Bulk mark read error:", error);
@@ -213,14 +237,20 @@ export async function bulkMarkInquiriesRead(inquiryIds: string[]) {
   }
 }
 
-export async function bulkMarkInquiriesUnread(inquiryIds: string[]) {
+export async function bulkMarkInquiriesUnread(
+  clinicSlug: string,
+  inquiryIds: string[],
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
   try {
     await prisma.inquiry.updateMany({
-      where: { id: { in: inquiryIds } },
+      where: { id: { in: inquiryIds }, clinicId: user.clinicId },
       data: { isRead: false },
     });
 
-    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    revalidatePath(`/clinic/${clinicSlug}/admin/inquiries`);
     return { success: true };
   } catch (error) {
     console.error("Bulk mark unread error:", error);
@@ -228,13 +258,19 @@ export async function bulkMarkInquiriesUnread(inquiryIds: string[]) {
   }
 }
 
-export async function bulkDeleteInquiries(inquiryIds: string[]) {
+export async function bulkDeleteInquiries(
+  clinicSlug: string,
+  inquiryIds: string[],
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
   try {
     await prisma.inquiry.deleteMany({
-      where: { id: { in: inquiryIds } },
+      where: { id: { in: inquiryIds }, clinicId: user.clinicId },
     });
 
-    revalidatePath("/clinic/[slug]/admin/inquiries", "page");
+    revalidatePath(`/clinic/${clinicSlug}/admin/inquiries`);
     return { success: true };
   } catch (error) {
     console.error("Bulk delete error:", error);

@@ -38,6 +38,8 @@ import { StyleEditor } from "./style-editor";
 import { SectionList } from "./section-list";
 import { AddSectionDialog } from "./add-section-dialog";
 import { ModernTemplateEditor } from "./modern-template-editor";
+import { TemplateThumbnail } from "./template-thumbnail";
+import { TemplatePreviewDialog } from "./template-preview-dialog";
 import { Eye, Save, Palette, Layers, Plus, LayoutTemplate } from "lucide-react";
 import Link from "next/link";
 
@@ -87,6 +89,9 @@ export function WebsiteBuilderClient({
   const [confirmTemplateId, setConfirmTemplateId] = useState<string | null>(
     null,
   );
+  const [previewingTemplateId, setPreviewingTemplateId] = useState<
+    string | null
+  >(null);
 
   async function handleSelectTemplate(templateId: string) {
     const result = await initializeWebsitePage(clinicSlug, templateId);
@@ -137,13 +142,21 @@ export function WebsiteBuilderClient({
     sectionId: string,
     content: Record<string, unknown>,
   ) {
-    setSections((prev) =>
-      prev.map((s) =>
+    setSections((prev) => {
+      if (prev.length === 0 && currentTemplate?.sections[0]) {
+        return [
+          {
+            ...currentTemplate.sections[0],
+            content: { ...currentTemplate.sections[0].content, ...content },
+          },
+        ];
+      }
+      return prev.map((s) =>
         s.id === sectionId
           ? { ...s, content: { ...s.content, ...content } }
           : s,
-      ),
-    );
+      );
+    });
   }
 
   function handleUpdateStyle(
@@ -172,22 +185,58 @@ export function WebsiteBuilderClient({
   }
 
   const renderTemplateGrid = (onSelect: (id: string) => void) => (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
       {WEBSITE_TEMPLATES.map((t) => (
         <Card
           key={t.id}
-          className="cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-          onClick={() => onSelect(t.id)}
+          className="group overflow-hidden border border-slate-200 hover:border-primary/50 hover:shadow-lg transition-all duration-300 flex flex-col justify-between"
         >
-          <CardHeader className="text-center pb-2">
-            <div className="text-4xl mb-2">{t.preview}</div>
-            <CardTitle className="text-lg">{t.name}</CardTitle>
-            <CardDescription>{t.description}</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <p className="text-xs text-muted-foreground text-center">
-              {t.sections.length} sections
-            </p>
+          <div>
+            {/* Visual Thumbnail Mockup */}
+            <div className="p-3 bg-slate-50 border-b border-slate-100">
+              <TemplateThumbnail templateId={t.id} />
+            </div>
+
+            <CardHeader className="pb-3 pt-4">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <CardTitle className="text-base font-bold flex items-center gap-1.5">
+                  <span>{t.preview}</span>
+                  <span>{t.name}</span>
+                </CardTitle>
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground bg-slate-100 px-2 py-0.5 rounded-full">
+                  Template
+                </span>
+              </div>
+              <CardDescription className="text-xs leading-relaxed line-clamp-2">
+                {t.description}
+              </CardDescription>
+            </CardHeader>
+          </div>
+
+          <CardContent className="pt-0 pb-4">
+            <div className="grid grid-cols-2 gap-2 pt-3 border-t border-slate-100">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-xs h-8 flex items-center justify-center gap-1 hover:bg-slate-100 text-slate-700 cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPreviewingTemplateId(t.id);
+                }}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Live Demo
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="text-xs h-8 font-medium cursor-pointer"
+                onClick={() => onSelect(t.id)}
+              >
+                Use Template
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ))}
@@ -202,10 +251,18 @@ export function WebsiteBuilderClient({
           <h2 className="text-xl font-bold">Choose a Template</h2>
           <p className="text-muted-foreground mt-1">
             Select a starting template for your clinic&apos;s public page. You
-            can fully customize it after.
+            can preview live demos or apply immediately and customize it after.
           </p>
         </div>
         {renderTemplateGrid(handleSelectTemplate)}
+
+        <TemplatePreviewDialog
+          templateId={previewingTemplateId}
+          onClose={() => setPreviewingTemplateId(null)}
+          onApply={handleSelectTemplate}
+          clinic={clinic}
+          clinicSlug={clinicSlug}
+        />
       </div>
     );
   }
@@ -215,6 +272,12 @@ export function WebsiteBuilderClient({
   const isRigid = currentTemplate?.templateType === "rigid";
 
   if (isRigid) {
+    const editorSection =
+      sections[0] ||
+      (currentTemplate?.sections[0]
+        ? { ...currentTemplate.sections[0] }
+        : null);
+
     return (
       <div className="space-y-4">
         {/* Top bar */}
@@ -244,27 +307,28 @@ export function WebsiteBuilderClient({
           </div>
         </div>
 
-        <ModernTemplateEditor
-          section={sections[0]}
-          onUpdateContent={(content) =>
-            handleUpdateContent(sections[0].id, content)
-          }
-        />
+        {editorSection && (
+          <ModernTemplateEditor
+            section={editorSection}
+            onUpdateContent={(content) =>
+              handleUpdateContent(editorSection.id, content)
+            }
+          />
+        )}
 
         {/* Dialog for changing templates from the rigid editor */}
         <Dialog
           open={confirmTemplateId === "show-picker"}
           onOpenChange={(open) => !open && setConfirmTemplateId(null)}
         >
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="max-w-6xl">
             <DialogHeader>
               <DialogTitle>Choose a Template</DialogTitle>
               <DialogDescription>
-                Warning: Selecting a new template will overwrite your current
-                content.
+                Preview or select a new template layout for your clinic.
               </DialogDescription>
             </DialogHeader>
-            <div className="max-h-[60vh] overflow-y-auto p-4">
+            <div className="max-h-[72vh] overflow-y-auto p-4">
               {renderTemplateGrid((id) => {
                 setConfirmTemplateId(id);
               })}
@@ -313,6 +377,16 @@ export function WebsiteBuilderClient({
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <TemplatePreviewDialog
+          templateId={previewingTemplateId}
+          onClose={() => setPreviewingTemplateId(null)}
+          onApply={(id) => {
+            setConfirmTemplateId(id);
+          }}
+          clinic={clinic}
+          clinicSlug={clinicSlug}
+        />
       </div>
     );
   }
@@ -460,6 +534,16 @@ export function WebsiteBuilderClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <TemplatePreviewDialog
+        templateId={previewingTemplateId}
+        onClose={() => setPreviewingTemplateId(null)}
+        onApply={(id) => {
+          setConfirmTemplateId(id);
+        }}
+        clinic={clinic}
+        clinicSlug={clinicSlug}
+      />
     </div>
   );
 }

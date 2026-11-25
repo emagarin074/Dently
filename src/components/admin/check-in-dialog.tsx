@@ -30,9 +30,12 @@ interface CheckInDialogProps {
     patient?: { firstName: string; lastName: string } | null;
     dentistId?: string | null;
     dentist?: { id?: string; name: string } | null;
+    branchId?: string | null;
+    branch?: { id: string; name: string } | null;
     serviceType?: string | null;
   };
   dentists: { id: string; name: string }[];
+  branches?: { id: string; name: string; isPrimary?: boolean }[];
   clinicSlug: string;
   onDone: () => void;
   trigger?: React.ReactNode;
@@ -41,6 +44,7 @@ interface CheckInDialogProps {
 export function CheckInDialog({
   appointment,
   dentists,
+  branches = [],
   clinicSlug,
   onDone,
   trigger,
@@ -50,26 +54,51 @@ export function CheckInDialog({
   const [selectedDentistId, setSelectedDentistId] = useState<string>(
     appointment.dentistId || appointment.dentist?.id || "",
   );
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(
+    appointment.branchId ||
+      appointment.branch?.id ||
+      branches.find((branch) => branch.isPrimary)?.id ||
+      branches[0]?.id ||
+      "",
+  );
 
   const patientName = appointment.patient
     ? `${appointment.patient.firstName} ${appointment.patient.lastName}`
     : appointment.bookingName || "Patient";
 
   async function handleCheckIn() {
-    setLoading(true);
-    const res = await checkInAppointment(
-      clinicSlug,
-      appointment.id,
-      selectedDentistId === "none" ? null : selectedDentistId || null,
-    );
-    if ("error" in res && res.error) {
-      toast.error(res.error);
-    } else {
-      toast.success(`Checked in ${patientName} into Today's Queue`);
-      setOpen(false);
-      onDone();
+    if (
+      !selectedDentistId ||
+      selectedDentistId === "none" ||
+      selectedDentistId.trim() === ""
+    ) {
+      toast.error("Please select an assigned dentist for this visit.");
+      return;
     }
-    setLoading(false);
+    if (!selectedBranchId) {
+      toast.error("Please select a clinic branch for this visit.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await checkInAppointment(
+        clinicSlug,
+        appointment.id,
+        selectedDentistId,
+        selectedBranchId,
+      );
+      if ("error" in res && res.error) {
+        toast.error(res.error);
+      } else {
+        toast.success(`Checked in ${patientName} into Today's Queue`);
+        setOpen(false);
+        onDone();
+      }
+    } catch {
+      toast.error("Network error while checking in patient. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -104,17 +133,39 @@ export function CheckInDialog({
 
           <div className="space-y-2">
             <Label className="text-xs font-medium">
-              Assign Attending Dentist
+              Branch <span className="text-red-500">*</span>
             </Label>
             <Select
-              value={selectedDentistId || "none"}
-              onValueChange={setSelectedDentistId}
+              value={selectedBranchId}
+              onValueChange={setSelectedBranchId}
+              required
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select dentist" />
+                <SelectValue placeholder="Select branch..." />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No preference / Unassigned</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-medium">
+              Assign Attending Dentist <span className="text-red-500">*</span>
+            </Label>
+            <Select
+              value={selectedDentistId}
+              onValueChange={setSelectedDentistId}
+              required
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select dentist..." />
+              </SelectTrigger>
+              <SelectContent>
                 {dentists.map((d) => (
                   <SelectItem key={d.id} value={d.id}>
                     {d.name}

@@ -9,10 +9,12 @@ export const metadata: Metadata = { title: "Settings" };
 
 interface Props {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<{ tab?: string }>;
 }
 
-export default async function SettingsPage({ params }: Props) {
+export default async function SettingsPage({ params, searchParams }: Props) {
   const { slug } = await params;
+  const { tab } = (await searchParams) || {};
   const user = await requireAdminAuth(slug);
   if (!user) redirect(`/clinic/${slug}/admin`);
 
@@ -43,6 +45,7 @@ export default async function SettingsPage({ params }: Props) {
         <SettingsClient
           clinic={JSON.parse(JSON.stringify(clinic))}
           clinicSlug={slug}
+          defaultTab={tab || "info"}
         />
       </main>
     </>

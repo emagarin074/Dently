@@ -4,13 +4,17 @@ import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { QueueStatus } from "@prisma/client";
+import { z } from "zod";
 
 function revalidate(slug: string) {
   revalidatePath(`/clinic/${slug}/admin/bookings`);
   revalidatePath(`/clinic/${slug}/admin`);
 }
 
-const VALID_QUEUE_STATUSES: string[] = Object.values(QueueStatus);
+const updateQueueStatusSchema = z.object({
+  entryId: z.string().min(1, "Entry ID is required"),
+  status: z.nativeEnum(QueueStatus, { message: "Invalid queue status." }),
+});
 
 export async function updateQueueStatus(
   clinicSlug: string,
@@ -20,30 +24,40 @@ export async function updateQueueStatus(
   const user = await requireAuth(clinicSlug);
   if (!user) return { error: "Unauthorized" };
 
-  if (!VALID_QUEUE_STATUSES.includes(status))
-    return { error: "Invalid queue status." };
+  const parsed = updateQueueStatusSchema.safeParse({ entryId, status });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0].message };
+  }
+
+  const { entryId: validEntryId, status: validStatus } = parsed.data;
 
   try {
     const entry = await prisma.queueEntry.findUnique({
-      where: { id: entryId, clinicId: user.clinicId },
+      where: { id: validEntryId, clinicId: user.clinicId },
     });
     if (!entry) return { error: "Queue entry not found" };
 
-    const updateData: Record<string, unknown> = { status };
-    if (status === "IN_CONSULTATION") updateData.calledAt = new Date();
-    if (status === "COMPLETED") updateData.completedAt = new Date();
+    const updateData: Record<string, unknown> = { status: validStatus };
+    if (validStatus === "IN_CONSULTATION") updateData.calledAt = new Date();
+    if (validStatus === "COMPLETED") updateData.completedAt = new Date();
 
     await prisma.queueEntry.update({
-      where: { id: entryId },
+      where: { id: validEntryId },
       data: updateData as never,
     });
 
     // When queue completes, mark the linked appointment as COMPLETED
     if (status === "COMPLETED" && entry.appointmentId) {
-      await prisma.appointment.update({
+      const appt = await prisma.appointment.update({
         where: { id: entry.appointmentId },
         data: { status: "COMPLETED" },
+        select: { patientId: true },
       });
+      if (appt.patientId) {
+        revalidatePath(
+          `/clinic/${clinicSlug}/admin/patients/${appt.patientId}`,
+        );
+      }
     }
 
     revalidate(clinicSlug);

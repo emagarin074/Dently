@@ -19,12 +19,16 @@ export function ConfirmActionDialog({
   onConfirm,
   loading,
   trigger,
+  confirmLabel = "Confirm",
+  destructive = false,
 }: {
   title: string;
   description: string;
   onConfirm: () => void;
   loading: boolean;
   trigger: React.ReactNode;
+  confirmLabel?: string;
+  destructive?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -43,13 +47,14 @@ export function ConfirmActionDialog({
             </Button>
           </DialogClose>
           <Button
+            variant={destructive ? "destructive" : "default"}
             onClick={() => {
               onConfirm();
               setOpen(false);
             }}
             disabled={loading}
           >
-            Confirm
+            {confirmLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

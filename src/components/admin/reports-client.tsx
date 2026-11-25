@@ -3,6 +3,14 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
   BarChart,
   Bar,
   XAxis,
@@ -34,6 +42,8 @@ interface Props {
     procedures: number;
     revenue: number;
   }[];
+  branches: { id: string; name: string; isPrimary: boolean }[];
+  selectedBranchId?: string;
 }
 
 const COLORS = [
@@ -46,14 +56,27 @@ const COLORS = [
 ];
 
 export function ReportsClient({
-  dailyRevenue,
-  monthlyRevenue,
-  yearlyRevenue,
-  monthlyData,
-  appointmentsByStatus,
-  procedureStats,
-  dentistRevenue,
-}: Props) {
+  dailyRevenue = 0,
+  monthlyRevenue = 0,
+  yearlyRevenue = 0,
+  monthlyData = [],
+  appointmentsByStatus = [],
+  procedureStats = [],
+  dentistRevenue = [],
+  branches = [],
+  selectedBranchId = "ALL",
+}: Partial<Props>) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  function changeBranchFilter(branchId: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (branchId === "ALL") params.delete("branch");
+    else params.set("branch", branchId);
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
   // Build daily revenue chart data for current month
   const dailyMap: Record<string, number> = {};
   monthlyData.forEach((p) => {
@@ -72,6 +95,22 @@ export function ReportsClient({
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <Select value={selectedBranchId} onValueChange={changeBranchFilter}>
+          <SelectTrigger className="h-10 w-full text-xs sm:w-[220px]">
+            <SelectValue placeholder="All branches" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All branches</SelectItem>
+            {branches.map((branch) => (
+              <SelectItem key={branch.id} value={branch.id}>
+                {branch.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
       {/* Revenue Summary */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>

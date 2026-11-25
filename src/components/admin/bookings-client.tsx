@@ -1,14 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useTransition, useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -23,7 +21,6 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogFooter,
-  DialogClose,
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
@@ -40,20 +37,26 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { toast } from "sonner";
-import { formatDateShort, formatDate } from "@/lib/utils";
-import { Check, X, Calendar, Plus, LogIn, Clock, FileText } from "lucide-react";
+import { formatDateShort } from "@/lib/utils";
+import {
+  Check,
+  X,
+  Plus,
+  Clock,
+  FileText,
+  MapPin,
+  UserCheck,
+} from "lucide-react";
 import Link from "next/link";
 import { UserRole } from "@prisma/client";
 import {
   updateAppointmentStatus,
-  rescheduleAppointment,
-  checkInAppointment,
   createManualBooking,
-  linkPatientToAppointment,
 } from "@/app/actions/appointments";
 import { updateQueueStatus, markQueueNoShow } from "@/app/actions/queue";
 import { type ProcedureOption } from "@/components/admin/add-procedure-dialog";
 import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
+import { LinkPatientDialog } from "@/components/admin/link-patient-dialog";
 import { RescheduleDialog } from "@/components/admin/reschedule-dialog";
 import { CheckInDialog } from "@/components/admin/check-in-dialog";
 import { TablePagination } from "@/components/ui/pagination";
@@ -81,6 +84,7 @@ interface RequestAppt {
     phone: string | null;
   } | null;
   dentist: { id: string; name: string } | null;
+  branch: { id: string; name: string } | null;
 }
 
 interface TodayAppt {
@@ -92,6 +96,7 @@ interface TodayAppt {
   preferredDate: string;
   patient: { id: string; firstName: string; lastName: string } | null;
   dentist: { id: string; name: string } | null;
+  branch: { id: string; name: string } | null;
   queueEntry: { id: string; queueNumber: number; status: string } | null;
 }
 
@@ -103,10 +108,12 @@ interface QueueEntry {
   notes: string | null;
   createdAt: string;
   appointmentId: string | null;
+  branch: { id: string; name: string } | null;
   appointment: {
     id: string;
     serviceType: string | null;
     dentist: { id: string; name: string } | null;
+    branch: { id: string; name: string } | null;
     patient: { id: string; firstName: string; lastName: string } | null;
   } | null;
 }
@@ -124,13 +131,16 @@ interface Props {
   todayQueue: QueueEntry[];
   procedures: ProcedureOption[];
   dentists: { id: string; name: string }[];
+  branches: { id: string; name: string; isPrimary: boolean }[];
   patients: PatientOption[];
   clinicSlug: string;
   userRole: UserRole;
   defaultTab: string;
+  selectedBranchId?: string;
   requestsTotal?: number;
   page?: number;
   blockedDates?: BlockedDate[];
+  queueWorkflow?: "FULL_WORKFLOW" | "SIMPLE_QUEUE" | "DIRECT_TREATMENT";
 }
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -163,15 +173,39 @@ const QUEUE_COLS = [
   },
 ];
 
-const NEXT_QUEUE_STATUS: Record<string, string> = {
-  WAITING: "IN_CONSULTATION",
-  IN_CONSULTATION: "IN_TREATMENT",
-};
-
-const NEXT_QUEUE_LABEL: Record<string, string> = {
-  WAITING: "Consult",
-  IN_CONSULTATION: "Treat",
-};
+function getQueueNextAction(
+  status: string,
+  workflow:
+    "FULL_WORKFLOW" | "SIMPLE_QUEUE" | "DIRECT_TREATMENT" = "FULL_WORKFLOW",
+): {
+  nextStatus?: string;
+  nextLabel?: string;
+  confirmTitle?: string;
+  confirmDesc?: string;
+} {
+  if (status === "WAITING") {
+    if (workflow === "FULL_WORKFLOW") {
+      return { nextStatus: "IN_CONSULTATION", nextLabel: "Consult" };
+    }
+    return { nextStatus: "IN_TREATMENT", nextLabel: "Treat" };
+  }
+  if (status === "IN_CONSULTATION") {
+    return { nextStatus: "IN_TREATMENT", nextLabel: "Treat" };
+  }
+  if (status === "IN_TREATMENT") {
+    return { nextStatus: "FOR_PAYMENT", nextLabel: "Payment" };
+  }
+  if (status === "FOR_PAYMENT") {
+    return {
+      nextStatus: "COMPLETED",
+      nextLabel: "Complete",
+      confirmTitle: "Complete Patient Visit",
+      confirmDesc:
+        "Are you sure you want to mark this patient visit as completed?",
+    };
+  }
+  return {};
+}
 
 function apptName(a: RequestAppt | TodayAppt) {
   return a.patient
@@ -185,19 +219,21 @@ export function BookingsClient({
   requests,
   todaySchedule,
   todayQueue,
-  procedures,
   dentists,
+  branches,
   patients,
   clinicSlug,
-  userRole,
   defaultTab,
+  selectedBranchId = "ALL",
   requestsTotal = 0,
   page = 1,
   blockedDates = [],
+  queueWorkflow = "FULL_WORKFLOW",
 }: Props) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState(defaultTab);
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [, startTransition] = useTransition();
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
   function refresh() {
@@ -206,11 +242,87 @@ export function BookingsClient({
 
   async function run<T>(id: string, fn: () => Promise<{ error?: string } | T>) {
     setLoadingId(id);
-    const result = (await fn()) as { error?: string };
-    if (result?.error) toast.error(result.error);
-    else refresh();
-    setLoadingId(null);
+    try {
+      const result = (await fn()) as { error?: string };
+      if (result?.error) toast.error(result.error);
+      else refresh();
+    } catch {
+      toast.error("Network error while processing request. Please try again.");
+    } finally {
+      setLoadingId(null);
+    }
   }
+
+  function changeBranchFilter(branchId: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (branchId === "ALL") params.delete("branch");
+    else params.set("branch", branchId);
+    params.set("page", "1");
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
+  const activeQueueCols = useMemo(() => {
+    const allCols = [
+      {
+        status: "WAITING",
+        label: queueWorkflow === "SIMPLE_QUEUE" ? "Queue" : "Waiting",
+        color: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      },
+      {
+        status: "IN_CONSULTATION",
+        label: "In Consultation",
+        color: "bg-blue-100 text-blue-800 border-blue-200",
+      },
+      {
+        status: "IN_TREATMENT",
+        label: "In Treatment",
+        color: "bg-purple-100 text-purple-800 border-purple-200",
+      },
+      {
+        status: "FOR_PAYMENT",
+        label: "For Payment",
+        color: "bg-orange-100 text-orange-800 border-orange-200",
+      },
+      {
+        status: "COMPLETED",
+        label: "Completed",
+        color: "bg-green-100 text-green-800 border-green-200",
+      },
+    ];
+
+    if (queueWorkflow === "DIRECT_TREATMENT") {
+      // Show IN_TREATMENT, FOR_PAYMENT, COMPLETED; preserve WAITING or IN_CONSULTATION only if non-empty
+      return allCols.filter(
+        (c) =>
+          (c.status !== "WAITING" && c.status !== "IN_CONSULTATION") ||
+          todayQueue.some((q) => q.status === c.status),
+      );
+    }
+
+    if (queueWorkflow === "SIMPLE_QUEUE") {
+      // Show WAITING (Queue), IN_TREATMENT, FOR_PAYMENT, COMPLETED; preserve IN_CONSULTATION only if non-empty
+      return allCols.filter(
+        (c) =>
+          c.status !== "IN_CONSULTATION" ||
+          todayQueue.some((q) => q.status === "IN_CONSULTATION"),
+      );
+    }
+
+    return allCols;
+  }, [queueWorkflow, todayQueue]);
+
+  const gridColClass = useMemo(() => {
+    if (activeQueueCols.length >= 5) {
+      return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5";
+    }
+    if (activeQueueCols.length === 4) {
+      return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-4";
+    }
+    if (activeQueueCols.length === 3) {
+      return "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
+    }
+    return "grid-cols-1 sm:grid-cols-2";
+  }, [activeQueueCols.length]);
 
   return (
     <Tabs defaultValue={defaultTab} className="space-y-4">
@@ -228,13 +340,30 @@ export function BookingsClient({
           <TabsTrigger value="queue">Queue</TabsTrigger>
         </TabsList>
 
-        <NewAppointmentModal
-          dentists={dentists}
-          patients={patients}
-          clinicSlug={clinicSlug}
-          onDone={refresh}
-          blockedDates={blockedDates}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={selectedBranchId} onValueChange={changeBranchFilter}>
+            <SelectTrigger className="h-9 w-[190px] text-xs">
+              <SelectValue placeholder="All branches" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All branches</SelectItem>
+              {branches.map((branch) => (
+                <SelectItem key={branch.id} value={branch.id}>
+                  {branch.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <NewAppointmentModal
+            dentists={dentists}
+            branches={branches}
+            patients={patients}
+            clinicSlug={clinicSlug}
+            onDone={refresh}
+            blockedDates={blockedDates}
+          />
+        </div>
       </div>
 
       {/* ── Tab 1: Booking Requests ── */}
@@ -255,6 +384,9 @@ export function BookingsClient({
                       Preferred Date
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Branch
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Concern
                     </th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">
@@ -266,7 +398,7 @@ export function BookingsClient({
                   {requests.length === 0 && (
                     <tr>
                       <td
-                        colSpan={5}
+                        colSpan={6}
                         className="px-4 py-10 text-center text-muted-foreground"
                       >
                         No pending booking requests
@@ -292,6 +424,9 @@ export function BookingsClient({
                       </td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                         {formatDateShort(a.preferredDate)}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {a.branch?.name || "Main Branch"}
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         <p className="text-xs text-muted-foreground line-clamp-2">
@@ -390,6 +525,9 @@ export function BookingsClient({
                       Dentist
                     </th>
                     <th className="px-4 py-3 text-left font-medium text-muted-foreground">
+                      Branch
+                    </th>
+                    <th className="px-4 py-3 text-left font-medium text-muted-foreground">
                       Status
                     </th>
                     <th className="px-4 py-3 text-right font-medium text-muted-foreground">
@@ -401,7 +539,7 @@ export function BookingsClient({
                   {todaySchedule.length === 0 && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={7}
                         className="px-4 py-10 text-center text-muted-foreground"
                       >
                         No appointments scheduled for today
@@ -425,6 +563,9 @@ export function BookingsClient({
                       <td className="px-4 py-3 text-muted-foreground">
                         {a.dentist?.name || "—"}
                       </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {a.branch?.name || "Main Branch"}
+                      </td>
                       <td className="px-4 py-3">
                         {a.status === "CHECKED_IN" && a.queueEntry ? (
                           <div className="flex items-center gap-2">
@@ -446,6 +587,7 @@ export function BookingsClient({
                               <CheckInDialog
                                 appointment={a}
                                 dentists={dentists}
+                                branches={branches}
                                 clinicSlug={clinicSlug}
                                 onDone={refresh}
                               />
@@ -492,9 +634,28 @@ export function BookingsClient({
       </TabsContent>
 
       {/* ── Tab 3: Queue Kanban ── */}
-      <TabsContent value="queue">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 pb-4 min-h-[400px]">
-          {QUEUE_COLS.map((col) => {
+      <TabsContent value="queue" className="space-y-3">
+        <div className="flex items-center justify-between gap-2 px-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="font-semibold text-slate-700">Queue Flow:</span>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full font-medium text-[11px] bg-slate-100 text-slate-700">
+              {queueWorkflow === "DIRECT_TREATMENT"
+                ? "Direct to Treatment (Auto Check-In)"
+                : queueWorkflow === "SIMPLE_QUEUE"
+                  ? "Simple Queue (Queue & Treatment)"
+                  : "Full Workflow (5 Stages)"}
+            </span>
+          </div>
+          <Link
+            href={`/clinic/${clinicSlug}/admin/settings?tab=queue`}
+            className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1"
+          >
+            Change in Settings
+          </Link>
+        </div>
+
+        <div className={`grid gap-4 pb-4 min-h-[400px] ${gridColClass}`}>
+          {activeQueueCols.map((col) => {
             const cards = todayQueue.filter((q) => q.status === col.status);
             return (
               <div key={col.status} className="flex flex-col min-w-0">
@@ -512,6 +673,7 @@ export function BookingsClient({
                       clinicSlug={clinicSlug}
                       loadingId={loadingId}
                       patients={patients}
+                      queueWorkflow={queueWorkflow}
                       onAction={(id, fn) => run(id, fn)}
                     />
                   ))}
@@ -532,39 +694,50 @@ export function BookingsClient({
 
 // ─── Queue card ───────────────────────────────────────────────────────────────
 
+function calculateMinutesAgo(createdAt: string | Date) {
+  const diff = Date.now() - new Date(createdAt).getTime();
+  return Math.max(0, Math.floor(diff / 60000));
+}
+
 function QueueCard({
   entry,
   clinicSlug,
   loadingId,
   patients,
+  queueWorkflow = "FULL_WORKFLOW",
   onAction,
 }: {
   entry: QueueEntry;
   clinicSlug: string;
   loadingId: string | null;
   patients: PatientOption[];
+  queueWorkflow?: "FULL_WORKFLOW" | "SIMPLE_QUEUE" | "DIRECT_TREATMENT";
   onAction: (id: string, fn: () => Promise<unknown>) => void;
 }) {
-  const nextStatus = NEXT_QUEUE_STATUS[entry.status];
-  const nextLabel = NEXT_QUEUE_LABEL[entry.status];
+  const nextAction = getQueueNextAction(entry.status, queueWorkflow);
   const isLoading = loadingId === entry.id;
-  const checkedInTime = new Date(entry.createdAt);
-  const minAgo = Math.floor((Date.now() - checkedInTime.getTime()) / 60000);
+  const [minAgo] = useState(() => calculateMinutesAgo(entry.createdAt));
 
   return (
     <Card className="overflow-hidden shadow-sm">
       <CardContent className="p-3 space-y-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-white font-bold text-sm flex-shrink-0">
-              {entry.queueNumber}
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white font-mono font-bold text-xs flex-shrink-0 shadow-2xs">
+              #{entry.queueNumber}
             </span>
             <div className="min-w-0">
-              <p className="font-semibold text-sm leading-tight truncate">
+              <p className="font-semibold text-xs sm:text-sm leading-tight text-slate-900 truncate">
                 {entry.patientName}
               </p>
-              <p className="text-xs text-muted-foreground truncate">
+              <p className="text-xs text-slate-500 truncate mt-0.5">
                 {entry.appointment?.serviceType || "—"}
+              </p>
+              <p className="text-[11px] text-slate-400 truncate flex items-center gap-1 mt-0.5">
+                <MapPin className="h-3 w-3" />
+                {entry.branch?.name ||
+                  entry.appointment?.branch?.name ||
+                  "Main Branch"}
               </p>
             </div>
           </div>
@@ -580,45 +753,102 @@ function QueueCard({
               {entry.appointment.dentist.name}
             </p>
           )}
-          {entry.appointmentId &&
-            entry.status !== "COMPLETED" &&
-            (entry.appointment?.patient ? (
-              <Link
-                href={`/clinic/${clinicSlug}/admin/treatment/${entry.appointmentId}`}
-                className="text-xs text-primary hover:underline flex items-center gap-0.5 ml-auto"
-              >
-                <FileText className="h-3 w-3" />
-                Chart
-              </Link>
-            ) : (
-              <LinkPatientDialog
-                appointmentId={entry.appointmentId}
-                clinicSlug={clinicSlug}
-                patients={patients}
-                trigger={
-                  <button className="text-xs text-primary hover:underline flex items-center gap-0.5 ml-auto bg-transparent border-none p-0">
+          {entry.appointmentId && entry.status !== "COMPLETED" && (
+            <div className="flex items-center gap-2 ml-auto">
+              {entry.appointment?.patient ? (
+                <>
+                  <LinkPatientDialog
+                    appointmentId={entry.appointmentId}
+                    clinicSlug={clinicSlug}
+                    patients={patients}
+                    currentPatient={{
+                      id: entry.appointment.patient.id,
+                      name: `${entry.appointment.patient.firstName} ${entry.appointment.patient.lastName}`,
+                    }}
+                    bookingName={entry.patientName}
+                    trigger={
+                      <button
+                        title="Change linked patient profile"
+                        className="text-[11px] text-muted-foreground hover:text-slate-800 hover:underline flex items-center gap-0.5 bg-transparent border-none p-0 cursor-pointer"
+                      >
+                        <UserCheck className="h-3 w-3 text-muted-foreground" />
+                        Re-link
+                      </button>
+                    }
+                  />
+                  <Link
+                    href={`/clinic/${clinicSlug}/admin/treatment/${entry.appointmentId}`}
+                    className="text-xs text-primary hover:underline flex items-center gap-0.5"
+                  >
                     <FileText className="h-3 w-3" />
                     Chart
-                  </button>
-                }
-              />
-            ))}
+                  </Link>
+                </>
+              ) : (
+                <LinkPatientDialog
+                  appointmentId={entry.appointmentId}
+                  clinicSlug={clinicSlug}
+                  patients={patients}
+                  bookingName={entry.patientName}
+                  trigger={
+                    <button className="text-xs text-primary hover:underline flex items-center gap-0.5 bg-transparent border-none p-0 cursor-pointer">
+                      <FileText className="h-3 w-3" />
+                      Chart
+                    </button>
+                  }
+                />
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-1 pt-1">
-          {nextStatus && (
+          {nextAction.nextStatus && !nextAction.confirmTitle && (
             <Button
               size="sm"
               className="h-6 px-2 text-xs flex-1"
               disabled={isLoading}
               onClick={() =>
                 onAction(entry.id, () =>
-                  updateQueueStatus(clinicSlug, entry.id, nextStatus),
+                  updateQueueStatus(
+                    clinicSlug,
+                    entry.id,
+                    nextAction.nextStatus!,
+                  ),
                 )
               }
             >
-              → {nextLabel}
+              → {nextAction.nextLabel}
             </Button>
+          )}
+
+          {nextAction.nextStatus && nextAction.confirmTitle && (
+            <ConfirmActionDialog
+              title={nextAction.confirmTitle}
+              description={
+                nextAction.confirmDesc ||
+                `Complete ${entry.patientName}'s visit?`
+              }
+              loading={isLoading}
+              onConfirm={() =>
+                onAction(entry.id, () =>
+                  updateQueueStatus(
+                    clinicSlug,
+                    entry.id,
+                    nextAction.nextStatus!,
+                  ),
+                )
+              }
+              trigger={
+                <Button
+                  size="sm"
+                  className="h-6 px-2 text-xs flex-1 bg-green-600 hover:bg-green-700 text-white"
+                  disabled={isLoading}
+                >
+                  ✓ {nextAction.nextLabel}
+                </Button>
+              }
+            />
           )}
 
           {entry.status === "WAITING" && (
@@ -647,123 +877,6 @@ function QueueCard({
   );
 }
 
-// ─── Link Patient Dialog ────────────────────────────────────────────────────────
-
-function LinkPatientDialog({
-  appointmentId,
-  clinicSlug,
-  patients,
-  trigger,
-}: {
-  appointmentId: string;
-  clinicSlug: string;
-  patients: PatientOption[];
-  trigger: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [openCombobox, setOpenCombobox] = useState(false);
-  const [selectedPatientId, setSelectedPatientId] = useState("");
-  const router = useRouter();
-
-  async function handleLink() {
-    if (!selectedPatientId) return;
-    setLoading(true);
-    const result = await linkPatientToAppointment(
-      clinicSlug,
-      appointmentId,
-      selectedPatientId,
-    );
-    if (result.error) toast.error(result.error);
-    else {
-      toast.success("Patient linked successfully");
-      setOpen(false);
-      router.refresh();
-    }
-    setLoading(false);
-  }
-
-  const selectedPatient = patients.find((p) => p.id === selectedPatientId);
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{trigger}</DialogTrigger>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Link Patient Profile</DialogTitle>
-          <DialogDescription>
-            This appointment was created from the public page and does not have
-            a linked patient profile. Before charting, you must link it to an
-            existing patient profile.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4 py-4">
-          <div className="space-y-2 flex flex-col">
-            <Label>Select Existing Patient</Label>
-            <Popover open={openCombobox} onOpenChange={setOpenCombobox}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={openCombobox}
-                  className="justify-between"
-                >
-                  {selectedPatient
-                    ? `${selectedPatient.firstName} ${selectedPatient.lastName}`
-                    : "Search patient..."}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[300px] p-0">
-                <Command>
-                  <CommandInput placeholder="Search patient..." />
-                  <CommandList>
-                    <CommandEmpty>No patient found.</CommandEmpty>
-                    <CommandGroup>
-                      {patients.map((p) => (
-                        <CommandItem
-                          key={p.id}
-                          value={`${p.firstName} ${p.lastName}`}
-                          onSelect={() => {
-                            setSelectedPatientId(p.id);
-                            setOpenCombobox(false);
-                          }}
-                        >
-                          <Check
-                            className={`mr-2 h-4 w-4 ${selectedPatientId === p.id ? "opacity-100" : "opacity-0"}`}
-                          />
-                          {p.firstName} {p.lastName}{" "}
-                          {p.phone ? `(${p.phone})` : ""}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </div>
-          <p className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
-            If the patient does not have a profile yet, please click{" "}
-            <strong>Cancel</strong>, go to the <strong>Patients</strong> tab,
-            create a new profile, and then return here to link it.
-          </p>
-        </div>
-
-        <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline" disabled={loading}>
-              Cancel
-            </Button>
-          </DialogClose>
-          <Button onClick={handleLink} disabled={!selectedPatientId || loading}>
-            Link Patient
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ─── Queue badge ──────────────────────────────────────────────────────────────
 
 function QueueBadge({ status }: { status: string }) {
@@ -782,11 +895,13 @@ function QueueBadge({ status }: { status: string }) {
 export function NewAppointmentModal({
   patients,
   dentists,
+  branches,
   clinicSlug,
   onDone,
   blockedDates = [],
 }: {
   dentists: { id: string; name: string }[];
+  branches: { id: string; name: string; isPrimary: boolean }[];
   patients: PatientOption[];
   clinicSlug: string;
   onDone: () => void;
@@ -807,6 +922,11 @@ export function NewAppointmentModal({
 
   const isToday = selectedDateVal === todayStr;
 
+  const [selectedDentistId, setSelectedDentistId] = useState<string>("");
+  const [selectedBranchId, setSelectedBranchId] = useState<string>(
+    branches.find((branch) => branch.isPrimary)?.id || branches[0]?.id || "",
+  );
+
   function isDateBlocked(dateStr: string): BlockedDate | null {
     if (!dateStr || dateStr === todayStr) return null;
     return (
@@ -823,6 +943,20 @@ export function NewAppointmentModal({
       return;
     }
     const fd = new FormData(e.currentTarget);
+    const chosenDentist = (fd.get("dentistId") as string) || selectedDentistId;
+    if (
+      !chosenDentist ||
+      chosenDentist === "none" ||
+      chosenDentist.trim() === ""
+    ) {
+      toast.error("Please select an assigned dentist.");
+      return;
+    }
+    if (!selectedBranchId) {
+      toast.error("Please select a branch.");
+      return;
+    }
+
     const chosenDate = (fd.get("preferredDate") as string) || selectedDateVal;
     const isChosenToday = chosenDate === todayStr;
 
@@ -839,6 +973,7 @@ export function NewAppointmentModal({
     fd.set("isWalkIn", isChosenToday ? "true" : "false");
     fd.set("preferredDate", chosenDate);
     fd.set("patientId", selectedPatient.id);
+    fd.set("branchId", selectedBranchId);
     fd.set(
       "bookingName",
       `${selectedPatient.firstName} ${selectedPatient.lastName}`,
@@ -851,28 +986,40 @@ export function NewAppointmentModal({
   async function handleConfirmCreate() {
     if (!pendingFd) return;
     setLoading(true);
-    const chosenDate =
-      (pendingFd.get("preferredDate") as string) || selectedDateVal;
-    const isChosenToday = chosenDate === todayStr;
+    try {
+      const chosenDate =
+        (pendingFd.get("preferredDate") as string) || selectedDateVal;
+      const isChosenToday = chosenDate === todayStr;
 
-    const result = await createManualBooking(clinicSlug, pendingFd);
-    if ("error" in result && result.error) {
-      toast.error(result.error);
-    } else {
-      const num = (result as { queueNumber?: number }).queueNumber;
-      toast.success(
-        isChosenToday ? `Checked in — Queue #${num}` : "Appointment created",
+      const result = await createManualBooking(clinicSlug, pendingFd);
+      if ("error" in result && result.error) {
+        toast.error(result.error);
+      } else {
+        const num = (result as { queueNumber?: number }).queueNumber;
+        toast.success(
+          isChosenToday ? `Checked in — Queue #${num}` : "Appointment created",
+        );
+        setConfirmOpen(false);
+        setOpen(false);
+        setSelectedPatient(null);
+        setPatientSearch("");
+        setDateError(null);
+        setSelectedDateVal(todayStr);
+        setSelectedBranchId(
+          branches.find((branch) => branch.isPrimary)?.id ||
+            branches[0]?.id ||
+            "",
+        );
+        setPendingFd(null);
+        onDone();
+      }
+    } catch {
+      toast.error(
+        "Network error while creating appointment. Please try again.",
       );
-      setConfirmOpen(false);
-      setOpen(false);
-      setSelectedPatient(null);
-      setPatientSearch("");
-      setDateError(null);
-      setSelectedDateVal(todayStr);
-      setPendingFd(null);
-      onDone();
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (
@@ -886,6 +1033,11 @@ export function NewAppointmentModal({
             setPatientSearch("");
             setDateError(null);
             setSelectedDateVal(todayStr);
+            setSelectedBranchId(
+              branches.find((branch) => branch.isPrimary)?.id ||
+                branches[0]?.id ||
+                "",
+            );
           }
         }}
       >
@@ -985,6 +1137,27 @@ export function NewAppointmentModal({
                 required
               />
             </div>
+            <div className="space-y-2">
+              <Label>
+                Branch <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                value={selectedBranchId}
+                onValueChange={setSelectedBranchId}
+                required
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select branch..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>Date</Label>
@@ -1029,10 +1202,17 @@ export function NewAppointmentModal({
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Assign Dentist</Label>
-              <Select name="dentistId">
+              <Label>
+                Assign Dentist <span className="text-red-500">*</span>
+              </Label>
+              <Select
+                name="dentistId"
+                value={selectedDentistId}
+                onValueChange={setSelectedDentistId}
+                required
+              >
                 <SelectTrigger>
-                  <SelectValue placeholder="No preference" />
+                  <SelectValue placeholder="Select dentist..." />
                 </SelectTrigger>
                 <SelectContent>
                   {dentists.map((d) => (

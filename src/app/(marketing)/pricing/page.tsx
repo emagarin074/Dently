@@ -15,8 +15,8 @@ const plans = [
     features: [
       "1 dentist account",
       "Up to 200 patients/month",
-      "Online booking",
-      "Calendar management",
+      "Branded public website for patients",
+      "Online booking & calendar",
       "Basic queue",
       "Basic reports",
     ],
@@ -32,6 +32,7 @@ const plans = [
     features: [
       "Up to 5 dentist accounts",
       "Unlimited patients",
+      "Custom public website & templates",
       "Full procedure builder",
       "Odontogram",
       "Document generation",
@@ -51,7 +52,7 @@ const plans = [
     description: "For large clinics, chains, and custom integrations.",
     features: [
       "Unlimited dentists",
-      "Multi-branch support",
+      "Multi-branch website directory",
       "Custom SMTP",
       "Custom templates",
       "API access",

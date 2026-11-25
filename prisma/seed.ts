@@ -1,26 +1,83 @@
-import "dotenv/config"
-import { Pool } from "pg"
-import { PrismaPg } from "@prisma/adapter-pg"
-import { PrismaClient } from "@prisma/client"
-import bcrypt from "bcryptjs"
+import "dotenv/config";
+import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { buildDefaultProcedureData } from "../src/lib/default-procedures";
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL })
-const adapter = new PrismaPg(pool)
-const prisma = new PrismaClient({ adapter })
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+const prisma = new PrismaClient({ adapter });
 
-async function main() {
-  console.log("🌱 Seeding database...")
+async function ensureDefaultBranch(clinicId: string) {
+  const clinic = await prisma.clinic.findUnique({
+    where: { id: clinicId },
+    include: { users: { select: { id: true } } },
+  });
+  if (!clinic) return;
 
-  // Create Luna Dental Care as first tenant
-  const slug = "luna-dental-care"
+  let branch = await prisma.branch.findFirst({
+    where: { clinicId, isPrimary: true },
+  });
 
-  const existingClinic = await prisma.clinic.findUnique({ where: { slug } })
-  if (existingClinic) {
-    console.log("✅ Luna Dental Care already exists, skipping seed.")
-    return
+  if (!branch) {
+    branch = await prisma.branch.findFirst({
+      where: { clinicId },
+      orderBy: { createdAt: "asc" },
+    });
   }
 
-  const passwordHash = await bcrypt.hash("admin123456", 12)
+  if (!branch) {
+    branch = await prisma.branch.create({
+      data: {
+        clinicId,
+        name: "Main Branch",
+        slug: "main",
+        address: clinic.address,
+        phone: clinic.phone,
+        email: clinic.email,
+        isPrimary: true,
+      },
+    });
+  } else if (!branch.isPrimary) {
+    branch = await prisma.branch.update({
+      where: { id: branch.id },
+      data: { isPrimary: true },
+    });
+  }
+
+  await prisma.userBranchAssignment.createMany({
+    data: clinic.users.map((user) => ({
+      clinicId,
+      branchId: branch.id,
+      userId: user.id,
+      isPrimary: true,
+    })),
+    skipDuplicates: true,
+  });
+
+  const procedureCount = await prisma.procedure.count({ where: { clinicId } });
+  if (procedureCount === 0) {
+    await prisma.procedure.createMany({
+      data: buildDefaultProcedureData(clinicId),
+    });
+  }
+}
+
+async function main() {
+  console.log("🌱 Seeding database...");
+
+  // Create Luna Dental Care as first tenant
+  const slug = "luna-dental-care";
+
+  const existingClinic = await prisma.clinic.findUnique({ where: { slug } });
+  if (existingClinic) {
+    await ensureDefaultBranch(existingClinic.id);
+    console.log("✅ Luna Dental Care already exists, skipping seed.");
+    return;
+  }
+
+  const passwordHash = await bcrypt.hash("admin123456", 12);
 
   const clinic = await prisma.clinic.create({
     data: {
@@ -29,7 +86,8 @@ async function main() {
       address: "123 Dental Street, Makati City, Metro Manila",
       phone: "+63 2 8888-8888",
       email: "info@lunadental.com",
-      description: "Modern dental care with a gentle touch. We provide comprehensive dental services for the whole family.",
+      description:
+        "Modern dental care with a gentle touch. We provide comprehensive dental services for the whole family.",
       isActive: true,
       settings: {
         create: {
@@ -62,7 +120,8 @@ async function main() {
         create: [
           {
             name: "Oral Prophylaxis (Cleaning)",
-            description: "Professional dental cleaning to remove plaque and tartar.",
+            description:
+              "Professional dental cleaning to remove plaque and tartar.",
             category: "Preventive",
             priceType: "FIXED",
             price: 800,
@@ -84,7 +143,8 @@ async function main() {
           },
           {
             name: "Tooth-Colored Filling (Composite)",
-            description: "Direct dental restoration using tooth-colored composite resin.",
+            description:
+              "Direct dental restoration using tooth-colored composite resin.",
             category: "Restorative",
             priceType: "RANGE",
             priceMin: 800,
@@ -117,7 +177,8 @@ async function main() {
           },
           {
             name: "Root Canal Treatment",
-            description: "Endodontic treatment to save an infected or damaged tooth.",
+            description:
+              "Endodontic treatment to save an infected or damaged tooth.",
             category: "Endodontics",
             priceType: "RANGE",
             priceMin: 5000,
@@ -175,15 +236,16 @@ async function main() {
         ],
       },
     },
-  })
+  });
 
-  console.log(`✅ Created clinic: ${clinic.name} (/${clinic.slug})`)
-  console.log(`📧 Admin login: maria@lunadental.com / admin123456`)
-  console.log(`📧 Assistant login: ana@lunadental.com / admin123456`)
-  console.log(`🌐 Public URL: /clinic/luna-dental-care`)
-  console.log(`🔧 Admin URL: /clinic/luna-dental-care/admin`)
+  console.log(`✅ Created clinic: ${clinic.name} (/${clinic.slug})`);
+  await ensureDefaultBranch(clinic.id);
+  console.log(`📧 Admin login: maria@lunadental.com / admin123456`);
+  console.log(`📧 Assistant login: ana@lunadental.com / admin123456`);
+  console.log(`🌐 Public URL: /clinic/luna-dental-care`);
+  console.log(`🔧 Admin URL: /clinic/luna-dental-care/admin`);
 }
 
 main()
   .catch(console.error)
-  .finally(() => prisma.$disconnect())
+  .finally(() => prisma.$disconnect());

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
 import { AdminHeader } from "@/components/admin/header";
 import { ProceduresClient } from "@/components/admin/procedures-client";
+import { getPlanEntitlements } from "@/lib/plan-entitlements";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = { title: "Procedures" };
@@ -22,6 +23,7 @@ export default async function ProceduresPage({ params, searchParams }: Props) {
 
   const take = 20;
   const skip = (parseInt(page || "1") - 1) * take;
+  const entitlements = getPlanEntitlements(user.clinic.plan);
 
   const [procedures, total, consentTemplates] = await Promise.all([
     prisma.procedure.findMany({
@@ -53,6 +55,7 @@ export default async function ProceduresPage({ params, searchParams }: Props) {
           page={parseInt(page || "1")}
           consentTemplates={consentTemplates}
           clinicSlug={slug}
+          entitlements={entitlements}
         />
       </main>
     </>

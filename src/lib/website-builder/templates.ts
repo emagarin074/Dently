@@ -10,7 +10,7 @@ export interface WebsiteTemplate {
   globalStyles: GlobalStyles;
 }
 
-function createSection(
+export function createSection(
   id: string,
   type: SectionBlock["type"],
   order: number,
@@ -50,6 +50,7 @@ export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
         order: 0,
         layout: "default",
         content: {
+          ...DEFAULT_SECTION_CONTENT.modern_data,
           navLinks: [
             { label: "Services", sectionId: "services" },
             { label: "About Us", sectionId: "about" },
@@ -81,78 +82,84 @@ export const WEBSITE_TEMPLATES: WebsiteTemplate[] = [
     id: "classic",
     name: "Classic",
     description:
-      "Traditional and trustworthy design focused on services and credentials",
+      "Traditional and prestigious design focused on clinical excellence and credentials",
     preview: "🏛️",
+    templateType: "rigid",
     globalStyles: {
-      primaryColor: "#1e40af",
-      secondaryColor: "#1e3a5f",
-      fontFamily: "roboto",
+      primaryColor: "#1e3a8a",
+      secondaryColor: "#0f172a",
+      fontFamily: "playfair",
       borderRadius: "sm",
       buttonStyle: "solid",
     },
     sections: [
-      createSection("hero-1", "hero", 0, { layout: "split" }),
-      createSection("about-1", "about", 1),
-      createSection("services-1", "services", 2, { layout: "list" }),
-      createSection("team-1", "team", 3, { layout: "default" }),
-      createSection("faq-1", "faq", 4),
-      createSection("booking-1", "booking", 5),
-      createSection("contact-1", "contact", 6),
+      {
+        id: "classic-data-1",
+        type: "classic_data" as SectionBlock["type"],
+        enabled: true,
+        order: 0,
+        layout: "default",
+        content: {
+          ...DEFAULT_SECTION_CONTENT.classic_data,
+        },
+        style: {},
+      },
     ],
   },
   {
     id: "minimal",
     name: "Minimal",
     description:
-      "Simple and elegant with lots of whitespace and focused content",
+      "Serene boutique design with architectural calm and mindful dental wellness",
     preview: "🌿",
+    templateType: "rigid",
     globalStyles: {
       primaryColor: "#059669",
       secondaryColor: "#047857",
-      fontFamily: "poppins",
-      borderRadius: "lg",
-      buttonStyle: "outline",
+      fontFamily: "inter",
+      borderRadius: "full",
+      buttonStyle: "solid",
     },
     sections: [
-      createSection("hero-1", "hero", 0, {
-        layout: "minimal",
-        style: { padding: "xl" },
-      }),
-      createSection("services-1", "services", 1, { layout: "minimal" }),
-      createSection("booking-1", "booking", 2),
-      createSection("contact-1", "contact", 3, { layout: "minimal" }),
+      {
+        id: "minimal-data-1",
+        type: "minimal_data" as SectionBlock["type"],
+        enabled: true,
+        order: 0,
+        layout: "default",
+        content: {
+          ...DEFAULT_SECTION_CONTENT.minimal_data,
+        },
+        style: {},
+      },
     ],
   },
   {
     id: "bold",
     name: "Bold",
-    description: "Vibrant and energetic with strong colors and dynamic layout",
+    description:
+      "High-impact modern smile studio with dynamic energy and vibrant transformations",
     preview: "🔥",
+    templateType: "rigid",
     globalStyles: {
-      primaryColor: "#dc2626",
+      primaryColor: "#e11d48",
       secondaryColor: "#ea580c",
       fontFamily: "poppins",
-      borderRadius: "full",
+      borderRadius: "md",
       buttonStyle: "solid",
     },
     sections: [
-      createSection("hero-1", "hero", 0, {
-        layout: "centered",
-        style: { padding: "xl" },
-      }),
-      createSection("services-1", "services", 1, { layout: "cards" }),
-      createSection("testimonials-1", "testimonials", 2, {
-        style: { backgroundColor: "#fef2f2", padding: "lg" },
-      }),
-      createSection("team-1", "team", 3, { layout: "grid" }),
-      createSection("cta-1", "cta", 4, {
-        style: {
-          backgroundColor: "#dc2626",
-          textColor: "#ffffff",
-          padding: "lg",
+      {
+        id: "bold-data-1",
+        type: "bold_data" as SectionBlock["type"],
+        enabled: true,
+        order: 0,
+        layout: "default",
+        content: {
+          ...DEFAULT_SECTION_CONTENT.bold_data,
         },
-      }),
-      createSection("booking-1", "booking", 5),
+        style: {},
+      },
     ],
   },
 ];

@@ -56,19 +56,25 @@ export default function PatientRegistrationPage({ params }: Props) {
   async function handlePatientSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    const fd = new FormData(e.currentTarget);
-    const data = Object.fromEntries(fd.entries());
-    data.gender = gender;
+    try {
+      const fd = new FormData(e.currentTarget);
+      const data = Object.fromEntries(fd.entries());
+      data.gender = gender;
 
-    const result = await submitPatientRegistration(slug, data);
-    if (result.error) {
-      toast.error(result.error);
+      const result = await submitPatientRegistration(slug, data);
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      setPatientId(result.patientId);
+      setStep("health");
+    } catch {
+      toast.error(
+        "Failed to submit registration. Please check your connection and try again.",
+      );
+    } finally {
       setLoading(false);
-      return;
     }
-    setPatientId(result.patientId);
-    setStep("health");
-    setLoading(false);
   }
 
   async function handleHealthSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -76,19 +82,23 @@ export default function PatientRegistrationPage({ params }: Props) {
     if (!patientId) return;
     setLoading(true);
 
-    const res = await fetch(`/api/clinic/${slug}/register/health`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientId, ...healthData }),
-    });
-    const result = await res.json();
-    if (result.error) {
-      toast.error(result.error);
+    try {
+      const res = await fetch(`/api/clinic/${slug}/register/health`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId, ...healthData }),
+      });
+      const result = await res.json();
+      if (result.error) {
+        toast.error(result.error);
+        return;
+      }
+      setStep("done");
+    } catch {
+      toast.error("Failed to submit health questionnaire. Please try again.");
+    } finally {
       setLoading(false);
-      return;
     }
-    setStep("done");
-    setLoading(false);
   }
 
   if (step === "done") {

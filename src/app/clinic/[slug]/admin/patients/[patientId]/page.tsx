@@ -11,8 +11,17 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { patientId } = await params;
-  const patient = await prisma.patient.findUnique({ where: { id: patientId } });
+  const { slug, patientId } = await params;
+  const clinic = await prisma.clinic.findUnique({
+    where: { slug },
+    select: { id: true },
+  });
+  if (!clinic) return { title: "Patient Not Found" };
+
+  const patient = await prisma.patient.findFirst({
+    where: { id: patientId, clinicId: clinic.id },
+    select: { firstName: true, lastName: true },
+  });
   if (!patient) return { title: "Patient Not Found" };
   return { title: `${patient.firstName} ${patient.lastName}` };
 }
@@ -33,7 +42,13 @@ export default async function PatientDetailPage({
       appointments: {
         include: {
           dentist: { select: { name: true } },
-          procedures: { include: { procedure: true, documents: true } },
+          procedures: {
+            include: {
+              procedure: true,
+              documents: true,
+              dentist: { select: { name: true } },
+            },
+          },
           billing: { include: { payments: true } },
         },
         orderBy: { preferredDate: "desc" },
@@ -48,7 +63,15 @@ export default async function PatientDetailPage({
           billing: {
             include: {
               appointment: {
-                select: { serviceType: true, preferredDate: true },
+                select: {
+                  serviceType: true,
+                  preferredDate: true,
+                  procedures: {
+                    include: {
+                      procedure: { select: { name: true } },
+                    },
+                  },
+                },
               },
             },
           },

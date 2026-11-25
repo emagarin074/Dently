@@ -35,12 +35,15 @@ interface AppointmentListType {
   bookingName: string | null;
   patient: { firstName: string; lastName: string } | null;
   dentist: { name: string } | null;
+  branchId?: string | null;
+  branch?: { id: string; name: string } | null;
 }
 
 interface ScheduleListProps {
   clinicSlug: string;
   initialAppointments: AppointmentListType[];
   dentists?: { id: string; name: string }[];
+  branches?: { id: string; name: string; isPrimary: boolean }[];
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -56,6 +59,7 @@ export function ScheduleListClient({
   clinicSlug,
   initialAppointments,
   dentists = [],
+  branches = [],
 }: ScheduleListProps) {
   const [appointments, setAppointments] =
     useState<AppointmentListType[]>(initialAppointments);
@@ -302,6 +306,7 @@ export function ScheduleListClient({
                           <CheckInDialog
                             appointment={a}
                             dentists={dentists}
+                            branches={branches}
                             clinicSlug={clinicSlug}
                             onDone={refresh}
                           />

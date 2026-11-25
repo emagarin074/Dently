@@ -18,8 +18,10 @@ import {
   cloneAndCreateNewVersion,
   publishProgram,
   archiveProgram,
+  recomputeCompensationLedgers,
 } from "@/app/actions/compensation";
 import { ProgramBuilderClient } from "./program-builder-client";
+import { ConfirmActionDialog } from "@/components/ui/confirm-action-dialog";
 import {
   Plus,
   Copy,
@@ -129,13 +131,35 @@ export function CompensationListClient({
     if ("error" in res && res.error) {
       toast.error(res.error);
     } else {
-      toast.success("Program published successfully!");
+      const recompute = "recompute" in res ? res.recompute : null;
+      toast.success(
+        recompute
+          ? `Program published. Recomputed ${recompute.processed} ledger record(s).`
+          : "Program published successfully!",
+      );
       setPrograms(
         programs.map((p) =>
           p.id === programId ? { ...p, status: "PUBLISHED" } : p,
         ),
       );
     }
+  }
+
+  async function handleRecomputeLedgers() {
+    setLoading(true);
+    const res = await recomputeCompensationLedgers(clinicSlug);
+    setLoading(false);
+
+    if ("error" in res && res.error) {
+      toast.error(res.error);
+      return;
+    }
+
+    const processed = "processed" in res ? res.processed : 0;
+    const skipped = "skipped" in res ? res.skipped : 0;
+    toast.success(
+      `Recomputed ${processed} ledger record(s), skipped ${skipped}.`,
+    );
   }
 
   async function handleArchive(programId: string) {
@@ -192,12 +216,29 @@ export function CompensationListClient({
           </p>
         </div>
 
-        <Button
-          onClick={() => setCreateDialogOpen(true)}
-          className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm"
-        >
-          <Plus className="w-4 h-4 mr-1.5" /> Create Program Draft
-        </Button>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <ConfirmActionDialog
+            title="Recompute compensation ledger?"
+            description="This will update unpaid, payable, and blocked ledger records using the latest published rules. Paid payroll history will stay locked."
+            loading={loading}
+            onConfirm={handleRecomputeLedgers}
+            trigger={
+              <Button
+                variant="outline"
+                className="font-bold text-xs shadow-sm"
+                disabled={loading}
+              >
+                Recompute Ledgers
+              </Button>
+            }
+          />
+          <Button
+            onClick={() => setCreateDialogOpen(true)}
+            className="bg-primary hover:bg-primary/90 text-white font-bold text-xs shadow-sm"
+          >
+            <Plus className="w-4 h-4 mr-1.5" /> Create Program Draft
+          </Button>
+        </div>
       </div>
 
       {programs.length === 0 ? (

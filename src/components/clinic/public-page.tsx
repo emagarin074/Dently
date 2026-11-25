@@ -37,6 +37,13 @@ export interface ClinicData {
   email: string | null;
   settings: { brandColor: string; operatingHours?: unknown } | null;
   users: { id: string; name: string; specialization: string | null }[];
+  branches?: {
+    id: string;
+    name: string;
+    address: string | null;
+    phone: string | null;
+    isPrimary: boolean;
+  }[];
   procedures: {
     id: string;
     name: string;
@@ -50,14 +57,22 @@ export interface ClinicData {
 
 export function ClinicPublicPage({
   clinic,
+  initialBranchId,
   blockedDates = [],
 }: {
   clinic: ClinicData;
+  initialBranchId?: string;
   blockedDates?: BlockedDate[];
 }) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [dentistId, setDentistId] = useState<string>("");
+  const [branchId, setBranchId] = useState<string>(
+    initialBranchId ||
+      clinic.branches?.find((branch) => branch.isPrimary)?.id ||
+      clinic.branches?.[0]?.id ||
+      "",
+  );
   const [service, setService] = useState<string>("");
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -97,18 +112,26 @@ export function ClinicPublicPage({
       return;
     }
     setLoading(true);
-    fd.set(
-      "preferredDentistId",
-      dentistId === "no-preference" ? "" : dentistId,
-    );
-    fd.set("serviceType", service);
-    const result = await createPublicBooking(clinic.slug, fd);
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      setSubmitted(true);
+    try {
+      fd.set(
+        "preferredDentistId",
+        dentistId === "no-preference" ? "" : dentistId,
+      );
+      fd.set("branchId", branchId);
+      fd.set("serviceType", service);
+      const result = await createPublicBooking(clinic.slug, fd);
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        setSubmitted(true);
+      }
+    } catch {
+      toast.error(
+        "Network error while submitting booking request. Please try again.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function getPriceLabel(proc: ClinicData["procedures"][0]) {
@@ -257,6 +280,28 @@ export function ClinicPublicPage({
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {clinic.branches && clinic.branches.length > 1 && (
+                    <div className="space-y-2">
+                      <Label>Preferred Branch *</Label>
+                      <Select
+                        value={branchId}
+                        onValueChange={setBranchId}
+                        required
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select a branch..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {clinic.branches.map((branch) => (
+                            <SelectItem key={branch.id} value={branch.id}>
+                              {branch.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label htmlFor="preferredDate">Preferred Date *</Label>

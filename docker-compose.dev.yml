@@ -6,11 +6,20 @@ services:
     ports:
       - "${POSTGRES_PORT:-5433}:5432"
     environment:
-      POSTGRES_USER: dently
-      POSTGRES_PASSWORD: dently
-      POSTGRES_DB: dently
+      POSTGRES_USER: ${POSTGRES_USER:-dently}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dently}
+      POSTGRES_DB: ${POSTGRES_DB:-dently}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: dently_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
 
   app:
     image: node:20-alpine
@@ -19,15 +28,33 @@ services:
     ports:
       - "3000:3000"
     environment:
-      DATABASE_URL: postgresql://dently:dently@postgres:5432/dently
-      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://dently:dently@postgres:5432/dently}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     volumes:
       - .:/app
       - /app/node_modules
       - /app/.next
-    command: sh -c "npm install && npx prisma generate && npm run dev"
+    command: sh -c "npm install --legacy-peer-deps && npx prisma generate && npm run dev"
     depends_on:
       - postgres
+      - redis
+
+  worker:
+    image: node:20-alpine
+    container_name: dently_worker_dev
+    working_dir: /app
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://dently:dently@postgres:5432/dently}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: sh -c "npm run worker"
+    depends_on:
+      - postgres
+      - redis
 
 volumes:
   postgres_data:
+  redis_data:

@@ -3,6 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireAdminAuth } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
+import { invalidateClinicCache } from "@/lib/cache/tenant-cache";
 import { SectionBlock, GlobalStyles } from "@/lib/website-builder/types";
 import { getTemplate } from "@/lib/website-builder/templates";
 
@@ -72,6 +73,7 @@ export async function saveWebsiteSections(
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Save website sections error:", error);
@@ -94,6 +96,7 @@ export async function saveWebsiteGlobalStyles(
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Save global styles error:", error);
@@ -115,6 +118,7 @@ export async function toggleWebsitePublished(
     });
 
     revalidatePath(`/clinic/${clinicSlug}`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Toggle website published error:", error);
@@ -149,6 +153,7 @@ export async function updateSectionContent(
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Update section content error:", error);
@@ -183,6 +188,7 @@ export async function updateSectionStyle(
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Update section style error:", error);
@@ -210,6 +216,7 @@ export async function addSection(clinicSlug: string, section: SectionBlock) {
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Add section error:", error);
@@ -238,6 +245,7 @@ export async function removeSection(clinicSlug: string, sectionId: string) {
 
     revalidatePath(`/clinic/${clinicSlug}`);
     revalidatePath(`/clinic/${clinicSlug}/admin/website`);
+    await invalidateClinicCache(clinicSlug);
     return { success: true };
   } catch (error) {
     console.error("Remove section error:", error);

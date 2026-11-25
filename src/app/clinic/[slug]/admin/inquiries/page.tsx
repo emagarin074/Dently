@@ -30,7 +30,7 @@ export default async function InquiriesPage({
     redirect("/");
   }
 
-  const { inquiries, total } = await getInquiries(clinic.id, 0, 20);
+  const { inquiries, total } = await getInquiries(slug, 0, 20);
 
   return (
     <>

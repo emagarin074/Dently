@@ -51,20 +51,27 @@ export function RescheduleDialog({
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    const fd = new FormData(e.currentTarget);
-    const result = await rescheduleAppointment(
-      clinicSlug,
-      appointment.id,
-      fd.get("date") as string,
-      (fd.get("time") as string) || undefined,
-    );
-    if ("error" in result && result.error) toast.error(result.error);
-    else {
-      toast.success("Appointment rescheduled");
-      setOpen(false);
-      onDone();
+    try {
+      const fd = new FormData(e.currentTarget);
+      const result = await rescheduleAppointment(
+        clinicSlug,
+        appointment.id,
+        fd.get("date") as string,
+        (fd.get("time") as string) || undefined,
+      );
+      if ("error" in result && result.error) toast.error(result.error);
+      else {
+        toast.success("Appointment rescheduled");
+        setOpen(false);
+        onDone();
+      }
+    } catch {
+      toast.error(
+        "Network error while rescheduling appointment. Please try again.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (

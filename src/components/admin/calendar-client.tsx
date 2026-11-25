@@ -46,7 +46,7 @@ import {
 import { updateAppointmentStatus } from "@/app/actions/appointments";
 import { DAYS_OF_WEEK, getOpenDays, isDayOpen } from "@/lib/operating-days";
 import { toast } from "sonner";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ChevronLeft,
   ChevronRight,
@@ -70,6 +70,8 @@ interface Appointment {
   bookingName: string | null;
   patient: { firstName: string; lastName: string } | null;
   dentist: { name: string } | null;
+  branchId?: string | null;
+  branch?: { id: string; name: string } | null;
 }
 
 interface Block {
@@ -86,6 +88,8 @@ interface Props {
   appointments: Appointment[];
   blocks: Block[];
   dentists: { id: string; name: string }[];
+  branches: { id: string; name: string; isPrimary: boolean }[];
+  selectedBranchId?: string;
   operatingHours?: unknown;
   clinicSlug: string;
   userRole: UserRole;
@@ -102,6 +106,8 @@ export function CalendarClient({
   appointments,
   blocks,
   dentists,
+  branches,
+  selectedBranchId = "ALL",
   operatingHours,
   clinicSlug,
   userRole,
@@ -125,6 +131,8 @@ export function CalendarClient({
   );
 
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const openDays = getOpenDays(operatingHours);
 
@@ -173,42 +181,59 @@ export function CalendarClient({
   async function handleBlockSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
-    const fd = new FormData(e.currentTarget);
-    fd.set("type", blockType);
+    try {
+      const fd = new FormData(e.currentTarget);
+      fd.set("type", blockType);
 
-    let result;
-    if (editingBlock) {
-      result = await updateCalendarBlock(clinicSlug, editingBlock.id, fd);
-    } else {
-      result = await createCalendarBlock(clinicSlug, fd);
-    }
+      let result;
+      if (editingBlock) {
+        result = await updateCalendarBlock(clinicSlug, editingBlock.id, fd);
+      } else {
+        result = await createCalendarBlock(clinicSlug, fd);
+      }
 
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      toast.success(editingBlock ? "Block updated" : "Block created");
-      setBlockOpen(false);
-      setEditingBlock(null);
-      router.refresh();
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        toast.success(editingBlock ? "Block updated" : "Block created");
+        setBlockOpen(false);
+        setEditingBlock(null);
+        router.refresh();
+      }
+    } catch {
+      toast.error(
+        "Network error while saving calendar block. Please try again.",
+      );
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleDeleteBlock(blockId: string) {
-    const result = await deleteCalendarBlock(clinicSlug, blockId);
-    if ("error" in result) toast.error(result.error);
-    else {
-      toast.success("Block removed");
-      router.refresh();
+    try {
+      const result = await deleteCalendarBlock(clinicSlug, blockId);
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success("Block removed");
+        router.refresh();
+      }
+    } catch {
+      toast.error("Network error while deleting block. Please try again.");
     }
   }
 
   async function handleStatusUpdate(id: string, status: string) {
-    const result = await updateAppointmentStatus(clinicSlug, id, status);
-    if (result.error) toast.error(result.error);
-    else {
-      toast.success("Appointment updated");
-      router.refresh();
+    try {
+      const result = await updateAppointmentStatus(clinicSlug, id, status);
+      if (result.error) toast.error(result.error);
+      else {
+        toast.success("Appointment updated");
+        router.refresh();
+      }
+    } catch {
+      toast.error(
+        "Network error while updating appointment. Please try again.",
+      );
     }
   }
 
@@ -241,12 +266,35 @@ export function CalendarClient({
     );
   };
 
+  function changeBranchFilter(branchId: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (branchId === "ALL") params.delete("branch");
+    else params.set("branch", branchId);
+    router.push(`${pathname}?${params.toString()}`);
+  }
+
   return (
     <Tabs defaultValue="calendar" className="space-y-4">
-      <TabsList>
-        <TabsTrigger value="calendar">Calendar View</TabsTrigger>
-        <TabsTrigger value="list">List View</TabsTrigger>
-      </TabsList>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <TabsList>
+          <TabsTrigger value="calendar">Calendar View</TabsTrigger>
+          <TabsTrigger value="list">List View</TabsTrigger>
+        </TabsList>
+
+        <Select value={selectedBranchId} onValueChange={changeBranchFilter}>
+          <SelectTrigger className="h-9 w-full text-xs sm:w-[220px]">
+            <SelectValue placeholder="All branches" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All branches</SelectItem>
+            {branches.map((branch) => (
+              <SelectItem key={branch.id} value={branch.id}>
+                {branch.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <TabsContent value="calendar" className="mt-0">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -904,6 +952,7 @@ export function CalendarClient({
             clinicSlug={clinicSlug}
             initialAppointments={appointments}
             dentists={dentists}
+            branches={branches}
           />
         </Suspense>
       </TabsContent>

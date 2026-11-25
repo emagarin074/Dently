@@ -49,7 +49,9 @@ import {
   Mail,
   Loader2,
   Calendar,
+  Activity,
 } from "lucide-react";
+import { SmartOdontogram } from "@/components/admin/smart-odontogram";
 import {
   AddProcedureDialog,
   type ProcedureOption,
@@ -135,7 +137,17 @@ interface Patient {
     serviceType: string | null;
     status: string;
     dentist: { name: string } | null;
-    procedures: { id: string; price: unknown; procedure: { name: string } }[];
+    procedures: {
+      id: string;
+      price: unknown;
+      procedure: { name: string; category?: string | null };
+      dentist?: { name: string } | null;
+      toothSelection?: unknown;
+      surfaceSelection?: unknown;
+      findings?: string | null;
+      diagnosis?: string | null;
+      remarks?: string | null;
+    }[];
     billing: {
       id: string;
       totalAmount: unknown;
@@ -202,6 +214,7 @@ export function PatientDetailClient({
   procedures,
   defaultTab = "overview",
 }: Props) {
+  const [activeTab, setActiveTab] = useState(defaultTab);
   const [editing, setEditing] = useState(false);
   const [gender, setGender] = useState(patient.gender || "");
   const [loading, setLoading] = useState(false);
@@ -305,9 +318,16 @@ export function PatientDetailClient({
         </CardContent>
       </Card>
 
-      <Tabs defaultValue={defaultTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger
+            value="odontogram"
+            className="gap-1.5 font-semibold text-primary data-[state=active]:bg-primary data-[state=active]:text-white"
+          >
+            <Activity className="w-3.5 h-3.5" />
+            Dental Chart
+          </TabsTrigger>
           <TabsTrigger value="questionnaire">Health Form</TabsTrigger>
           <TabsTrigger value="appointments">Appointments</TabsTrigger>
           <TabsTrigger value="billing">Billing</TabsTrigger>
@@ -461,6 +481,87 @@ export function PatientDetailClient({
               )}
             </CardContent>
           </Card>
+
+          {/* Dental Chart Quick Access Card */}
+          <Card className="mt-4 border-slate-200/90 shadow-xs">
+            <CardHeader className="flex flex-row items-center justify-between pb-3">
+              <div>
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-primary" />
+                  Dental Chart & Odontogram
+                </CardTitle>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  FDI two-digit dental chart with missing teeth identification
+                  and multi-procedure timeline.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setActiveTab("odontogram")}
+                className="text-xs font-semibold text-primary border-primary/20 hover:bg-primary/5"
+              >
+                Open Full Dental Chart &rarr;
+              </Button>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                  <p className="text-[11px] font-semibold text-slate-500 uppercase">
+                    Teeth Tracked
+                  </p>
+                  <p className="text-xl font-bold font-mono text-slate-900 mt-1">
+                    32
+                  </p>
+                  <p className="text-[10px] text-slate-400">Adult Dentition</p>
+                </div>
+                <div className="p-3 bg-cyan-50/50 border border-cyan-100 rounded-xl">
+                  <p className="text-[11px] font-semibold text-cyan-800 uppercase">
+                    Total Visits
+                  </p>
+                  <p className="text-xl font-bold font-mono text-cyan-800 mt-1">
+                    {patient.appointments.length}
+                  </p>
+                  <p className="text-[10px] text-cyan-700">Appointments</p>
+                </div>
+                <div className="p-3 bg-purple-50/50 border border-purple-100 rounded-xl">
+                  <p className="text-[11px] font-semibold text-purple-800 uppercase">
+                    Procedures Performed
+                  </p>
+                  <p className="text-xl font-bold font-mono text-purple-700 mt-1">
+                    {patient.appointments.reduce(
+                      (sum, a) => sum + (a.procedures?.length || 0),
+                      0,
+                    )}
+                  </p>
+                  <p className="text-[10px] text-purple-700">
+                    Recorded Treatments
+                  </p>
+                </div>
+                <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-xl flex flex-col justify-center items-center">
+                  <p className="text-[11px] font-semibold text-emerald-800 uppercase">
+                    Smart Chart
+                  </p>
+                  <p className="text-xs font-bold text-emerald-700 mt-1">
+                    Interactive & Ready
+                  </p>
+                  <p className="text-[10px] text-emerald-600 mt-0.5">
+                    Click to view teeth
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Smart Odontogram */}
+        <TabsContent value="odontogram" className="mt-4">
+          <SmartOdontogram
+            patientId={patient.id}
+            clinicSlug={clinicSlug}
+            appointments={patient.appointments}
+            patientNotes={patient.patientNotes}
+          />
         </TabsContent>
 
         {/* Health Questionnaire */}
@@ -1122,6 +1223,8 @@ export function PatientDetailClient({
                                 <img
                                   src={fileSource}
                                   alt={d.title}
+                                  loading="lazy"
+                                  decoding="async"
                                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                 />
                               ) : (

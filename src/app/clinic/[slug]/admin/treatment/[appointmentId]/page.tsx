@@ -3,6 +3,10 @@ import { prisma } from "@/lib/prisma";
 import { redirect, notFound } from "next/navigation";
 import { AdminHeader } from "@/components/admin/header";
 import { TreatmentClient } from "@/components/admin/treatment-client";
+import {
+  parsePlannedTreatments,
+  type PlannedTreatmentItem,
+} from "@/lib/treatment-planning";
 
 interface Props {
   params: Promise<{ slug: string; appointmentId: string }>;
@@ -106,10 +110,27 @@ export default async function TreatmentPage({ params }: Props) {
     hasExistingPhoto = allTypes.includes("PHOTO");
   }
 
-  const clinic = await prisma.clinic.findUnique({
-    where: { id: user.clinicId },
-    select: { name: true, address: true, phone: true, email: true },
-  });
+  let plannedTreatments: PlannedTreatmentItem[] = [];
+  if (appointment.patientId) {
+    const patientNotes = await prisma.patientNote.findMany({
+      where: { patientId: appointment.patientId },
+      orderBy: { createdAt: "asc" },
+      select: { id: true, content: true, createdAt: true },
+    });
+    plannedTreatments = parsePlannedTreatments(patientNotes);
+  }
+
+  const [clinic, patients] = await Promise.all([
+    prisma.clinic.findUnique({
+      where: { id: user.clinicId },
+      select: { name: true, address: true, phone: true, email: true },
+    }),
+    prisma.patient.findMany({
+      where: { clinicId: user.clinicId, isActive: true },
+      select: { id: true, firstName: true, lastName: true, phone: true },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    }),
+  ]);
 
   return (
     <>
@@ -123,10 +144,12 @@ export default async function TreatmentPage({ params }: Props) {
           clinicSlug={slug}
           appointment={JSON.parse(JSON.stringify(appointment))}
           procedures={JSON.parse(JSON.stringify(procedures))}
+          patients={JSON.parse(JSON.stringify(patients))}
           hasExistingConsent={hasExistingConsent}
           hasExistingXray={hasExistingXray}
           hasExistingPhoto={hasExistingPhoto}
           clinicInfo={clinic ? JSON.parse(JSON.stringify(clinic)) : null}
+          plannedTreatments={JSON.parse(JSON.stringify(plannedTreatments))}
         />
       </main>
     </>

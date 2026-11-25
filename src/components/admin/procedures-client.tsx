@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { TablePagination } from "@/components/ui/pagination";
+import type { PlanEntitlements } from "@/lib/plan-entitlements";
 
 interface ConsentTemplate {
   id: string;
@@ -267,31 +268,36 @@ function ProcedureForm({
     }
 
     setLoading(true);
-    Object.entries(toggles).forEach(([k, v]) => fd.set(k, String(v)));
-    fd.set("priceType", priceType);
-    fd.set("consentTemplateId", consentTemplateId);
-    fd.set("category", category);
+    try {
+      Object.entries(toggles).forEach(([k, v]) => fd.set(k, String(v)));
+      fd.set("priceType", priceType);
+      fd.set("consentTemplateId", consentTemplateId);
+      fd.set("category", category);
 
-    const finalRules = {
-      severityPrices,
-      materialPrices,
-      shadePrices,
-      toothSurfaceSurcharge,
-      doubleArchSurcharge,
-    };
-    fd.set("priceRules", JSON.stringify(finalRules));
+      const finalRules = {
+        severityPrices,
+        materialPrices,
+        shadePrices,
+        toothSurfaceSurcharge,
+        doubleArchSurcharge,
+      };
+      fd.set("priceRules", JSON.stringify(finalRules));
 
-    const result = procedure
-      ? await updateProcedure(clinicSlug, procedure.id, fd)
-      : await createProcedure(clinicSlug, fd);
+      const result = procedure
+        ? await updateProcedure(clinicSlug, procedure.id, fd)
+        : await createProcedure(clinicSlug, fd);
 
-    if ("error" in result) toast.error(result.error);
-    else {
-      toast.success(procedure ? "Procedure updated" : "Procedure created");
-      onClose();
-      router.refresh();
+      if ("error" in result) toast.error(result.error);
+      else {
+        toast.success(procedure ? "Procedure updated" : "Procedure created");
+        onClose();
+        router.refresh();
+      }
+    } catch {
+      toast.error("Network error while saving procedure. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function handleTemplateCreated(t: ConsentTemplate) {
@@ -740,6 +746,20 @@ function ProcedureForm({
               )}
             </div>
           )}
+          {group.group === "Payment Options" &&
+            toggles.isInstallmentAvailable && (
+              <div className="mt-3 p-3 bg-indigo-50 border border-indigo-200/80 rounded-xl text-xs text-indigo-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-indigo-950">
+                  <span>⚡ Required Installment Agreement Photo</span>
+                </p>
+                <p className="text-[11px] text-indigo-700 leading-relaxed">
+                  When this procedure is billed as an installment plan,
+                  uploading a photo of the patient&apos;s signed{" "}
+                  <strong>Installment Agreement</strong> contract is required
+                  during the initial payment setup.
+                </p>
+              </div>
+            )}
         </div>
       ))}
 
@@ -784,6 +804,7 @@ export function ProceduresClient({
   clinicSlug: string;
   total: number;
   page: number;
+  entitlements?: PlanEntitlements;
 }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Procedure | null>(null);
@@ -814,9 +835,15 @@ export function ProceduresClient({
   }
 
   async function handleToggleActive(p: Procedure) {
-    const result = await toggleProcedureActive(clinicSlug, p.id, !p.isActive);
-    if ("error" in result) toast.error(result.error);
-    else router.refresh();
+    try {
+      const result = await toggleProcedureActive(clinicSlug, p.id, !p.isActive);
+      if ("error" in result) toast.error(result.error);
+      else router.refresh();
+    } catch {
+      toast.error(
+        "Network error while updating procedure status. Please try again.",
+      );
+    }
   }
 
   return (

@@ -72,6 +72,7 @@ import { AlertCircle } from "lucide-react";
 interface Props {
   clinic: ClinicData;
   data: Record<string, unknown>;
+  initialBranchId?: string;
   blockedDates?: BlockedDate[];
 }
 
@@ -83,11 +84,22 @@ const PlatformIcon: Record<string, React.ElementType> = {
   YouTube: FaYoutube,
 };
 
-export function ModernTemplate({ clinic, data, blockedDates = [] }: Props) {
+export function ModernTemplate({
+  clinic,
+  data,
+  initialBranchId,
+  blockedDates = [],
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [inquiryLoading, setInquiryLoading] = useState(false);
   const [dentistId, setDentistId] = useState<string>("");
+  const [branchId, setBranchId] = useState<string>(
+    initialBranchId ||
+      clinic.branches?.find((branch) => branch.isPrimary)?.id ||
+      clinic.branches?.[0]?.id ||
+      "",
+  );
   const [service, setService] = useState<string>("");
   const [dateError, setDateError] = useState<string | null>(null);
 
@@ -179,19 +191,25 @@ export function ModernTemplate({ clinic, data, blockedDates = [] }: Props) {
       return;
     }
     setLoading(true);
-    fd.set(
-      "preferredDentistId",
-      dentistId === "no-preference" ? "" : dentistId,
-    );
-    fd.set("serviceType", service);
-    const result = await createPublicBooking(clinic.slug, fd);
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      setSubmitted(true);
-      toast.success("Booking submitted successfully!");
+    try {
+      fd.set(
+        "preferredDentistId",
+        dentistId === "no-preference" ? "" : dentistId,
+      );
+      fd.set("branchId", branchId);
+      fd.set("serviceType", service);
+      const result = await createPublicBooking(clinic.slug, fd);
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        setSubmitted(true);
+        toast.success("Booking submitted successfully!");
+      }
+    } catch {
+      toast.error("Network error while submitting booking. Please try again.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   async function handleInquirySubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -207,14 +225,19 @@ export function ModernTemplate({ clinic, data, blockedDates = [] }: Props) {
     }
 
     setInquiryLoading(true);
-    const result = await createInquiry(clinic.slug, fd);
-    if (result?.error) {
-      toast.error(result.error);
-    } else {
-      toast.success("Message sent successfully!");
-      (e.target as HTMLFormElement).reset();
+    try {
+      const result = await createInquiry(clinic.slug, fd);
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Message sent successfully!");
+        (e.target as HTMLFormElement).reset();
+      }
+    } catch {
+      toast.error("Network error while sending message. Please try again.");
+    } finally {
+      setInquiryLoading(false);
     }
-    setInquiryLoading(false);
   }
 
   const handleScroll = (e: React.MouseEvent<HTMLElement>, id: string) => {
@@ -779,6 +802,30 @@ export function ModernTemplate({ clinic, data, blockedDates = [] }: Props) {
                       </SelectContent>
                     </Select>
                   </div>
+
+                  {clinic.branches && clinic.branches.length > 1 && (
+                    <div className="space-y-2">
+                      <Label className="text-sm font-medium text-slate-700">
+                        Preferred Branch *
+                      </Label>
+                      <Select
+                        value={branchId}
+                        onValueChange={setBranchId}
+                        required
+                      >
+                        <SelectTrigger className="bg-slate-50 border-slate-200 h-14">
+                          <SelectValue placeholder="Select a branch..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {clinic.branches.map((branch) => (
+                            <SelectItem key={branch.id} value={branch.id}>
+                              {branch.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
 
                   <div className="space-y-2">
                     <Label

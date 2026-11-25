@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { UserRole } from "@prisma/client";
 import crypto from "crypto";
+import { getClinicAccessStatus } from "@/lib/subscription-status";
 
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 12);
@@ -76,6 +77,7 @@ export async function requireAuth(
 export async function requireAdminAuth(clinicSlug: string) {
   const user = await requireAuth(clinicSlug);
   if (!user || user.role !== UserRole.DENTIST_ADMIN) return null;
+  if (getClinicAccessStatus(user.clinic) !== "ACTIVE") return null;
   return user;
 }
 

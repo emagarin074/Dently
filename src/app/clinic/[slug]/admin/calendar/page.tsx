@@ -9,10 +9,12 @@ export const metadata: Metadata = { title: "Calendar" };
 
 interface Props {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ branch?: string }>;
 }
 
-export default async function CalendarPage({ params }: Props) {
+export default async function CalendarPage({ params, searchParams }: Props) {
   const { slug } = await params;
+  const { branch } = await searchParams;
   const user = await requireAuth(slug);
   if (!user) redirect(`/clinic/${slug}/login`);
 
@@ -20,37 +22,46 @@ export default async function CalendarPage({ params }: Props) {
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const lastOfMonth = new Date(now.getFullYear(), now.getMonth() + 2, 0);
 
-  const [appointments, blocks, dentists, settings] = await Promise.all([
-    prisma.appointment.findMany({
-      where: {
-        clinicId: user.clinicId,
-        preferredDate: { gte: firstOfMonth, lte: lastOfMonth },
-        status: { not: "CANCELLED" },
-      },
-      select: {
-        id: true,
-        preferredDate: true,
-        scheduledDate: true,
-        scheduledTime: true,
-        status: true,
-        serviceType: true,
-        patient: { select: { firstName: true, lastName: true } },
-        bookingName: true,
-        dentist: { select: { name: true } },
-      },
-    }),
-    prisma.calendarBlock.findMany({
-      where: { clinicId: user.clinicId, endDate: { gte: firstOfMonth } },
-    }),
-    prisma.user.findMany({
-      where: { clinicId: user.clinicId, isActive: true },
-      select: { id: true, name: true },
-    }),
-    prisma.clinicSettings.findUnique({
-      where: { clinicId: user.clinicId },
-      select: { operatingHours: true },
-    }),
-  ]);
+  const [appointments, blocks, dentists, settings, branches] =
+    await Promise.all([
+      prisma.appointment.findMany({
+        where: {
+          clinicId: user.clinicId,
+          ...(branch && branch !== "ALL" ? { branchId: branch } : {}),
+          preferredDate: { gte: firstOfMonth, lte: lastOfMonth },
+          status: { not: "CANCELLED" },
+        },
+        select: {
+          id: true,
+          preferredDate: true,
+          scheduledDate: true,
+          scheduledTime: true,
+          status: true,
+          serviceType: true,
+          patient: { select: { firstName: true, lastName: true } },
+          bookingName: true,
+          dentist: { select: { name: true } },
+          branchId: true,
+          branch: { select: { id: true, name: true } },
+        },
+      }),
+      prisma.calendarBlock.findMany({
+        where: { clinicId: user.clinicId, endDate: { gte: firstOfMonth } },
+      }),
+      prisma.user.findMany({
+        where: { clinicId: user.clinicId, isActive: true },
+        select: { id: true, name: true },
+      }),
+      prisma.clinicSettings.findUnique({
+        where: { clinicId: user.clinicId },
+        select: { operatingHours: true },
+      }),
+      prisma.branch.findMany({
+        where: { clinicId: user.clinicId, isActive: true },
+        select: { id: true, name: true, isPrimary: true },
+        orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+      }),
+    ]);
 
   return (
     <>
@@ -60,6 +71,8 @@ export default async function CalendarPage({ params }: Props) {
           appointments={JSON.parse(JSON.stringify(appointments))}
           blocks={JSON.parse(JSON.stringify(blocks))}
           dentists={dentists}
+          branches={branches}
+          selectedBranchId={branch || "ALL"}
           operatingHours={settings?.operatingHours || null}
           clinicSlug={slug}
           userRole={user.role}

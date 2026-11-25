@@ -37,6 +37,18 @@ export default async function UsersPage({ params, searchParams }: Props) {
         licenseNumber: true,
         specialization: true,
         createdAt: true,
+        staffPayProfile: {
+          select: {
+            payType: true,
+            dailyRate: true,
+            expectedTimeIn: true,
+            expectedTimeOut: true,
+            breakMinutes: true,
+            lateGraceMinutes: true,
+            lateDeductionType: true,
+            lateDeductionValue: true,
+          },
+        },
       },
     }),
     prisma.user.count({ where: { clinicId: user.clinicId } }),

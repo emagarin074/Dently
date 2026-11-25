@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { useRouter } from "next/navigation";
 import { Stethoscope, AlertTriangle, CheckCircle } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
+import { compressImage } from "@/lib/image-compression";
 
 export interface ProcedureOption {
   id: string;
@@ -48,6 +49,7 @@ export interface ProcedureOption {
   requirePhoto: boolean;
   requireXray: boolean;
   requireLabDocs: boolean;
+  isInstallmentAvailable: boolean;
   consentTemplate: { content: string; name: string } | null;
   priceRules?: unknown;
 }
@@ -66,59 +68,133 @@ function buildGenericConsentHtml(procedureName: string) {
   <meta charset="UTF-8">
   <title>Consent Form – ${procedureName}</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 24px; font-size: 13px; color: #111; }
-    h1 { font-size: 18px; text-align: center; margin-bottom: 4px; }
-    h2 { font-size: 13px; text-align: center; color: #555; font-weight: normal; margin-bottom: 24px; }
-    p { line-height: 1.7; margin: 10px 0; }
-    .field { border-bottom: 1px solid #333; display: inline-block; min-width: 220px; margin: 0 4px; }
-    .section { margin-top: 28px; }
-    .sig-row { display: flex; gap: 40px; margin-top: 32px; }
-    .sig-box { flex: 1; }
-    .sig-line { border-top: 1px solid #333; margin-top: 40px; padding-top: 4px; font-size: 11px; color: #555; }
-    @media print { body { margin: 20px; } button { display: none; } }
+    @page { size: letter portrait; margin: 0.5in; }
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      max-width: 760px;
+      margin: 20px auto;
+      padding: 36px 44px;
+      font-size: 13.5px;
+      color: #0f172a;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      line-height: 1.7;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    @media print {
+      body { margin: 0; padding: 0; border: none; max-width: 100%; }
+      button { display: none !important; }
+    }
   </style>
 </head>
 <body>
-  <h1>Patient Informed Consent Form</h1>
-  <h2>${procedureName}</h2>
-
-  <div class="section">
-    <p>Patient Name: <span class="field">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-       Date of Birth: <span class="field">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></p>
-    <p>Date: <span class="field">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>
-       Dentist: <span class="field">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span></p>
+  <!-- Executive Medical Letterhead -->
+  <div style="margin-bottom: 24px;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr>
+        <td style="vertical-align: middle; width: 60%;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="width: 38px; height: 38px; border-radius: 10px; background: #0f172a; color: #ffffff; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; font-family: sans-serif;">
+              ✚
+            </div>
+            <div>
+              <h2 style="margin: 0; font-size: 20px; color: #0f172a; font-weight: 800; letter-spacing: -0.02em; text-transform: uppercase; line-height: 1.2;">
+                DENTAL PRACTICE WORKSPACE
+              </h2>
+              <p style="margin: 3px 0 0 0; font-size: 10px; font-weight: 700; letter-spacing: 1.5px; color: #0284c7; text-transform: uppercase;">
+                Dental Clinic &amp; Oral Healthcare Practice
+              </p>
+            </div>
+          </div>
+        </td>
+        <td style="vertical-align: middle; width: 40%; text-align: right; font-size: 11px; color: #475569; line-height: 1.6;">
+          <strong style="color: #0f172a;">Official Clinical Record</strong><br/>
+          <span>Patient Informed Consent Documentation</span>
+        </td>
+      </tr>
+    </table>
+    <div style="margin-top: 16px; border-bottom: 2.5px solid #0f172a;"></div>
+    <div style="margin-top: 2px; border-bottom: 1px solid #0284c7;"></div>
   </div>
 
-  <div class="section">
-    <p><strong>Procedure:</strong> ${procedureName}</p>
-    <p>I, the undersigned patient (or guardian/authorized representative), hereby give my informed consent to the above-named dental procedure. I acknowledge that the nature of the procedure, its purpose, material risks, benefits, alternatives, and expected outcomes have been explained to me by the attending dental professional.</p>
-    <p>I understand that dental procedures involve inherent risks including but not limited to: infection, pain, swelling, nerve sensitivity, allergic reactions to anesthetics or materials, and in rare cases, injury to adjacent structures. I have had the opportunity to ask questions and all my questions have been answered satisfactorily.</p>
-    <p>I acknowledge that no guarantee has been made regarding the outcome of this procedure. I agree to follow all post-procedure instructions provided and to promptly report any unusual symptoms or complications.</p>
-    <p>I authorize the dental team to take photographs or radiographs as clinically necessary for the purpose of treatment planning and record-keeping, subject to applicable privacy laws.</p>
+  <!-- Structured Clinical Metadata Header -->
+  <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 18px; margin-bottom: 24px;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+      <tr>
+        <td style="padding: 3px 0; width: 55%; vertical-align: top;">
+          <span style="color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Patient Name</span><br/>
+          <strong style="color: #0f172a; font-size: 14px;">_______________________________</strong>
+        </td>
+        <td style="padding: 3px 0; width: 45%; vertical-align: top; text-align: right;">
+          <span style="color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Date of Birth / Date</span><br/>
+          <strong style="color: #0f172a; font-size: 13px;">____ / ____ / ________</strong>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 6px 0 0 0; vertical-align: top;">
+          <span style="color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Attending Dentist</span><br/>
+          <span style="color: #1e293b; font-size: 12px; font-weight: 600;">Dr. ___________________________</span>
+        </td>
+        <td style="padding: 6px 0 0 0; vertical-align: top; text-align: right;">
+          <span style="color: #64748b; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Clinical Procedure</span><br/>
+          <span style="color: #1e293b; font-size: 12px; font-weight: 600;">${procedureName}</span>
+        </td>
+      </tr>
+    </table>
   </div>
 
-  <div class="sig-row">
-    <div class="sig-box">
-      <div class="sig-line">Patient / Guardian Signature</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-line">Print Name</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-line">Date Signed</div>
+  <!-- Title Badge -->
+  <div style="text-align: center; margin-bottom: 24px;">
+    <span style="display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: #0f172a; background: #ffffff; border: 1.5px solid #cbd5e1; padding: 6px 22px; border-radius: 6px;">
+      INFORMED CONSENT FOR DENTAL TREATMENT
+    </span>
+  </div>
+
+  <div style="font-size: 13.5px; color: #334155; line-height: 1.7; margin-bottom: 24px;">
+    <p style="margin-bottom: 14px;">I, the undersigned patient (or legal guardian/authorized representative), hereby give my informed authorization and consent to perform the dental procedure: <strong style="color: #0f172a; text-decoration: underline;">${procedureName}</strong>.</p>
+
+    <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px 18px; margin: 16px 0;">
+      <p style="margin: 0 0 8px 0; font-weight: 700; color: #0f172a; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Terms &amp; Clinical Acknowledgments:</p>
+      <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #475569; line-height: 1.6;">
+        <li style="margin-bottom: 6px;">The nature of the procedure, its purpose, material risks, expected benefits, and available clinical alternatives have been thoroughly explained to me.</li>
+        <li style="margin-bottom: 6px;">I understand that dental treatments involve inherent risks including but not limited to discomfort, sensitivity, bleeding, swelling, nerve proximity, or allergic responses to local anesthetics or materials.</li>
+        <li style="margin-bottom: 6px;">I acknowledge that unforeseen clinical conditions may require modification to the original procedural plan, and I authorize necessary adjustments in good clinical judgment.</li>
+        <li>I have had the opportunity to ask questions and all my questions have been answered to my satisfaction.</li>
+      </ul>
     </div>
   </div>
 
-  <div class="sig-row">
-    <div class="sig-box">
-      <div class="sig-line">Dentist / Witness Signature</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-line">Print Name &amp; License No.</div>
-    </div>
-    <div class="sig-box">
-      <div class="sig-line">Date</div>
-    </div>
+  <!-- Official Signature Block -->
+  <div style="margin-top: 48px; padding-top: 20px; border-top: 1px dashed #cbd5e1;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <tr>
+        <td style="width: 50%; vertical-align: top; padding-right: 24px;">
+          <div style="border-top: 1.5px solid #0f172a; padding-top: 8px; width: 220px;">
+            <strong style="color: #0f172a; font-size: 13px;">Patient / Guardian Signature</strong><br/>
+            <span style="font-size: 11px; color: #64748b;">Printed Name: _____________________</span><br/>
+            <span style="font-size: 10px; color: #94a3b8;">Date Signed: ____ / ____ / ________</span>
+          </div>
+        </td>
+        <td style="width: 50%; vertical-align: top; text-align: right;">
+          <div style="display: inline-block; text-align: left;">
+            <div style="border-top: 1.5px solid #0f172a; padding-top: 8px; width: 230px;">
+              <strong style="color: #0f172a; font-size: 13px;">Attending Dentist Signature</strong><br/>
+              <span style="font-size: 11px; color: #64748b;">Attending Dental Practitioner</span><br/>
+              <span style="font-size: 10px; color: #64748b; font-family: monospace;">Lic. No.: ___________ PTR: ___________</span>
+            </div>
+          </div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- Official Footer -->
+  <div style="margin-top: 40px; padding-top: 12px; border-top: 1px solid #f1f5f9; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #94a3b8;">
+    <span>CONFIDENTIAL MEDICAL RECORD</span>
+    <span>OFFICIAL CLINIC DOCUMENT</span>
   </div>
 
   <script>window.onload = () => window.print()</script>
@@ -257,48 +333,62 @@ export function AddProcedureDialog({
     }
 
     setLoading(true);
+    try {
+      let consentDocument:
+        | {
+            base64: string;
+            mimeType: string;
+            fileName: string;
+            fileSize: number;
+          }
+        | undefined;
+      if (selected?.requireSignedConsent && consentFile) {
+        const buffer = await consentFile.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++)
+          binary += String.fromCharCode(bytes[i]);
+        consentDocument = {
+          base64: btoa(binary),
+          mimeType: consentFile.type || "application/octet-stream",
+          fileName: consentFile.name,
+          fileSize: consentFile.size,
+        };
+      }
 
-    let consentDocument:
-      | { base64: string; mimeType: string; fileName: string; fileSize: number }
-      | undefined;
-    if (selected?.requireSignedConsent && consentFile) {
-      const buffer = await consentFile.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++)
-        binary += String.fromCharCode(bytes[i]);
-      consentDocument = {
-        base64: btoa(binary),
-        mimeType: consentFile.type || "application/octet-stream",
-        fileName: consentFile.name,
-        fileSize: consentFile.size,
-      };
+      const result = await addProcedureToAppointment(
+        clinicSlug,
+        appointmentId,
+        {
+          procedureId: selectedId,
+          price: priceNum,
+          toothSelection: teeth.length > 0 ? teeth : undefined,
+          surfaceSelection:
+            Object.keys(surfaces).length > 0 ? surfaces : undefined,
+          upperLower: upperLower || undefined,
+          material: material || undefined,
+          shade: shade || undefined,
+          severity: severity || undefined,
+          remarks: remarks || undefined,
+          consentDocument,
+        },
+      );
+
+      if ("error" in result) {
+        toast.error(result.error);
+      } else {
+        toast.success("Procedure added");
+        setOpen(false);
+        setSelectedId("");
+        setManualPriceOverride(null);
+        setConsentFile(null);
+        router.refresh();
+      }
+    } catch {
+      toast.error("Network error while adding procedure. Please try again.");
+    } finally {
+      setLoading(false);
     }
-
-    const result = await addProcedureToAppointment(clinicSlug, appointmentId, {
-      procedureId: selectedId,
-      price: priceNum,
-      toothSelection: teeth.length > 0 ? teeth : undefined,
-      surfaceSelection: Object.keys(surfaces).length > 0 ? surfaces : undefined,
-      upperLower: upperLower || undefined,
-      material: material || undefined,
-      shade: shade || undefined,
-      severity: severity || undefined,
-      remarks: remarks || undefined,
-      consentDocument,
-    });
-
-    if ("error" in result) {
-      toast.error(result.error);
-    } else {
-      toast.success("Procedure added");
-      setOpen(false);
-      setSelectedId("");
-      setManualPriceOverride(null);
-      setConsentFile(null);
-      router.refresh();
-    }
-    setLoading(false);
   }
 
   return (
@@ -377,8 +467,20 @@ export function AddProcedureDialog({
               </p>
               <Input
                 type="file"
-                accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => setConsentFile(e.target.files?.[0] ?? null)}
+                accept="image/*"
+                onChange={async (e) => {
+                  const rawFile = e.target.files?.[0];
+                  if (rawFile) {
+                    try {
+                      const { file: compressed } = await compressImage(rawFile);
+                      setConsentFile(compressed);
+                    } catch {
+                      setConsentFile(rawFile);
+                    }
+                  } else {
+                    setConsentFile(null);
+                  }
+                }}
                 className="cursor-pointer text-sm"
               />
               {consentFile && (
@@ -449,6 +551,7 @@ export function AddProcedureDialog({
                   <Odontogram
                     selectedTeeth={teeth}
                     selectedSurfaces={surfaces}
+                    hasToothSurface={Boolean(selected.hasToothSurface)}
                     onChange={(t, s) => {
                       setTeeth(t);
                       setSurfaces(s);

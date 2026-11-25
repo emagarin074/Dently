@@ -34,6 +34,10 @@ const SECTION_ICONS: Record<SectionType, typeof Image> = {
   cta: Megaphone,
   custom: LayoutTemplate,
   modern_data: LayoutTemplate,
+  classic_data: LayoutTemplate,
+  minimal_data: LayoutTemplate,
+  bold_data: LayoutTemplate,
+  template_data: LayoutTemplate,
 };
 
 const SECTION_LABELS: Record<SectionType, string> = {
@@ -49,6 +53,10 @@ const SECTION_LABELS: Record<SectionType, string> = {
   cta: "Call to Action",
   custom: "Custom Section",
   modern_data: "Modern Template Data",
+  classic_data: "Classic Template Data",
+  minimal_data: "Minimal Template Data",
+  bold_data: "Bold Template Data",
+  template_data: "Template Data",
 };
 
 interface Props {

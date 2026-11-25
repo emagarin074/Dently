@@ -18,13 +18,17 @@ model Clinic {
   email       String?
   website     String?
   description String?
-  isActive    Boolean  @default(true)
-  plan        String   @default("Starter")
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive      Boolean   @default(true)
+  plan          String    @default("Starter")
+  branchLimit   Int       @default(1)
+  planExpiresAt DateTime?
+  planNotes     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   settings       ClinicSettings?
   users          User[]
+  branches       Branch[]
   patients       Patient[]
   appointments   Appointment[]
   procedures     Procedure[]
@@ -38,17 +42,28 @@ model Clinic {
   inquiries      Inquiry[]
   compensationPrograms CompensationProgram[]
   compensationLedgers  CompensationLedger[]
+  payrollRuns          PayrollRun[]
+  staffPayProfiles     StaffPayProfile[]
+  staffAttendances     StaffAttendance[]
+  userBranchAssignments UserBranchAssignment[]
 
   @@index([slug])
 }
 
+enum QueueWorkflow {
+  FULL_WORKFLOW
+  SIMPLE_QUEUE
+  DIRECT_TREATMENT
+}
+
 model ClinicSettings {
-  id                  String  @id @default(cuid())
-  clinicId            String  @unique
-  clinic              Clinic  @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  id                  String         @id @default(cuid())
+  clinicId            String         @unique
+  clinic              Clinic         @relation(fields: [clinicId], references: [id], onDelete: Cascade)
   operatingHours      Json?
-  brandColor          String  @default("#0891b2")
-  appointmentLeadDays Int     @default(30)
+  brandColor          String         @default("#0891b2")
+  appointmentLeadDays Int            @default(30)
+  queueWorkflow       QueueWorkflow  @default(FULL_WORKFLOW)
   smtpHost            String?
   smtpPort            Int?
   smtpUser            String?
@@ -94,10 +109,54 @@ model User {
   appointments AppointmentProcedure[]
   dentistAppts Appointment[]          @relation("DentistAppointments")
   sessions     Session[]
+  payrollRuns  PayrollRun[]
+  staffPayProfile StaffPayProfile?
+  staffAttendances StaffAttendance[]
+  branchAssignments UserBranchAssignment[]
 
-  @@unique([email, clinicId])
   @@index([clinicId])
-  @@index([email])
+  @@unique([email])
+}
+
+model Branch {
+  id          String   @id @default(cuid())
+  clinicId    String
+  clinic      Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String
+  address     String?
+  phone       String?
+  email       String?
+  isPrimary   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userAssignments UserBranchAssignment[]
+  appointments     Appointment[]
+  queueEntries     QueueEntry[]
+
+  @@unique([clinicId, slug])
+  @@index([clinicId])
+  @@index([clinicId, isActive])
+}
+
+model UserBranchAssignment {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([branchId, userId])
+  @@index([clinicId])
+  @@index([clinicId, userId])
+  @@index([clinicId, branchId])
 }
 
 model Session {
@@ -111,6 +170,18 @@ model Session {
   @@index([token])
   @@index([userId])
 }
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([email])
+}
+
 
 // ─── PATIENTS ────────────────────────────────────────────────────────────────
 
@@ -207,6 +278,8 @@ model Appointment {
   patient        Patient?          @relation(fields: [patientId], references: [id])
   dentistId      String?
   dentist        User?             @relation("DentistAppointments", fields: [dentistId], references: [id])
+  branchId       String?
+  branch         Branch?           @relation(fields: [branchId], references: [id], onDelete: SetNull)
   bookingName    String?
   bookingPhone   String?
   bookingEmail   String?
@@ -229,6 +302,7 @@ model Appointment {
   queueEntry QueueEntry?
 
   @@index([clinicId])
+  @@index([clinicId, branchId])
   @@index([clinicId, preferredDate])
   @@index([clinicId, status])
   @@index([clinicId, dentistId, preferredDate])
@@ -253,6 +327,8 @@ model QueueEntry {
   clinic        Clinic      @relation(fields: [clinicId], references: [id], onDelete: Cascade)
   appointmentId String?     @unique
   appointment   Appointment? @relation(fields: [appointmentId], references: [id])
+  branchId      String?
+  branch        Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
   patientName   String
   queueNumber   Int
   status        QueueStatus @default(WAITING)
@@ -264,7 +340,9 @@ model QueueEntry {
   updatedAt     DateTime    @updatedAt
 
   @@index([clinicId])
+  @@index([clinicId, branchId])
   @@index([clinicId, date])
+  @@index([clinicId, branchId, date])
   @@index([clinicId, date, status])
 }
 
@@ -381,6 +459,7 @@ model AppointmentProcedure {
   updatedAt     DateTime @updatedAt
 
   documents ProcedureDocument[]
+  compensationLedger CompensationLedger?
 
   @@index([appointmentId])
 }
@@ -448,6 +527,7 @@ enum DocumentType {
   PHOTO
   LAB_REQUEST
   LAB_RESULT
+  INSTALLMENT_AGREEMENT
   OTHER
 }
 
@@ -705,7 +785,8 @@ model CompensationLedger {
   id             String               @id @default(cuid())
   clinicId       String
   clinic         Clinic               @relation(fields: [clinicId], references: [id], onDelete: Cascade)
-  treatmentId    String?
+  treatmentId    String?              @unique
+  treatment      AppointmentProcedure? @relation(fields: [treatmentId], references: [id], onDelete: SetNull)
   patientId      String?
   dentistId      String
   procedureName  String
@@ -728,10 +809,14 @@ model CompensationLedger {
   createdBy      String?
 
   createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  payrollItems   PayrollRunItem[]
 
   @@index([clinicId])
   @@index([clinicId, dentistId])
   @@index([clinicId, status])
+  @@index([clinicId, createdAt])
 }
 
 model CompensationAuditLog {
@@ -749,4 +834,93 @@ model CompensationAuditLog {
 
   @@index([clinicId])
   @@index([programId])
+}
+
+model PayrollRun {
+  id            String           @id @default(cuid())
+  clinicId      String
+  clinic        Clinic           @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  staffId       String
+  staff         User             @relation(fields: [staffId], references: [id], onDelete: Restrict)
+  periodStart   DateTime
+  periodEnd     DateTime
+  grossRevenue  Decimal          @default(0) @db.Decimal(10, 2)
+  netRevenue    Decimal          @default(0) @db.Decimal(10, 2)
+  commission    Decimal          @default(0) @db.Decimal(10, 2)
+  bonuses       Decimal          @default(0) @db.Decimal(10, 2)
+  adjustments   Decimal          @default(0) @db.Decimal(10, 2)
+  totalPayable  Decimal          @default(0) @db.Decimal(10, 2)
+  runType       String           @default("COMPENSATION") // COMPENSATION, DAILY_SALARY
+  attendanceSummary Json?
+  status        String           @default("DRAFT") // DRAFT, APPROVED, PAID, VOIDED
+  approvedBy    String?
+  approvedAt    DateTime?
+  paidBy        String?
+  paidAt        DateTime?
+  paymentMethod String?
+  reference     String?
+  notes         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  items         PayrollRunItem[]
+
+  @@index([clinicId])
+  @@index([clinicId, staffId])
+  @@index([clinicId, status])
+  @@index([clinicId, periodStart, periodEnd])
+}
+
+model PayrollRunItem {
+  id           String             @id @default(cuid())
+  payrollRunId String
+  payrollRun   PayrollRun         @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  ledgerId     String             @unique
+  ledger       CompensationLedger @relation(fields: [ledgerId], references: [id], onDelete: Restrict)
+  amount       Decimal            @db.Decimal(10, 2)
+  createdAt    DateTime           @default(now())
+
+  @@index([payrollRunId])
+}
+
+model StaffPayProfile {
+  id                 String   @id @default(cuid())
+  clinicId           String
+  clinic             Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  staffId            String   @unique
+  staff              User     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  payType            String   @default("FIXED_DAILY") // FIXED_DAILY, PROCEDURE_BASED
+  dailyRate          Decimal  @db.Decimal(10, 2)
+  expectedTimeIn     String?  @default("08:00")
+  expectedTimeOut    String?  @default("17:00")
+  breakMinutes       Int      @default(60)
+  lateGraceMinutes   Int      @default(0)
+  lateDeductionType  String   @default("PER_MINUTE") // PER_MINUTE, FIXED, PERCENTAGE
+  lateDeductionValue Decimal  @default(0) @db.Decimal(10, 2)
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([clinicId])
+  @@index([clinicId, isActive])
+}
+
+model StaffAttendance {
+  id        String   @id @default(cuid())
+  clinicId  String
+  clinic    Clinic   @relation(fields: [clinicId], references: [id], onDelete: Cascade)
+  staffId   String
+  staff     User     @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  date      DateTime
+  status    String   // PRESENT, HALF_DAY, ABSENT
+  timeIn    String?
+  timeOut   String?
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clinicId, staffId, date])
+  @@index([clinicId])
+  @@index([clinicId, staffId])
+  @@index([clinicId, date])
 }

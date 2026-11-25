@@ -83,21 +83,30 @@ export function InquiriesClient({
   async function handleSendReply() {
     if (!selectedInquiry || !replyText.trim()) return;
     setSendingReply(true);
-    const res = await replyToInquiry(clinicSlug, selectedInquiry.id, replyText);
-    if (res.error) {
-      toast.error(res.error);
-    } else {
-      toast.success("Reply email sent to patient!");
-      setReplyOpen(false);
-      setReplyText("");
-      setSelectedInquiry({ ...selectedInquiry, isRead: true });
-      setInquiries((prev) =>
-        prev.map((i) =>
-          i.id === selectedInquiry.id ? { ...i, isRead: true } : i,
-        ),
+    try {
+      const res = await replyToInquiry(
+        clinicSlug,
+        selectedInquiry.id,
+        replyText,
       );
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        toast.success("Reply email sent to patient!");
+        setReplyOpen(false);
+        setReplyText("");
+        setSelectedInquiry({ ...selectedInquiry, isRead: true });
+        setInquiries((prev) =>
+          prev.map((i) =>
+            i.id === selectedInquiry.id ? { ...i, isRead: true } : i,
+          ),
+        );
+      }
+    } catch {
+      toast.error("Failed to send reply. Please check your connection.");
+    } finally {
+      setSendingReply(false);
     }
-    setSendingReply(false);
   }
 
   const [prevInitialInquiries, setPrevInitialInquiries] =
@@ -119,7 +128,7 @@ export function InquiriesClient({
     ) {
       setLoadingMore(true);
       try {
-        const res = await getInquiries(clinicId, inquiries.length, 20);
+        const res = await getInquiries(clinicSlug, inquiries.length, 20);
         if (res.inquiries && res.inquiries.length > 0) {
           setInquiries((prev) => {
             const existingIds = new Set(prev.map((i) => i.id));
@@ -138,6 +147,7 @@ export function InquiriesClient({
         }
       } catch (err) {
         console.error("Error fetching more inquiries:", err);
+        toast.error("Failed to load more inquiries. Please try again.");
       } finally {
         setLoadingMore(false);
       }
@@ -146,81 +156,117 @@ export function InquiriesClient({
 
   const handleMarkAsRead = async (id: string) => {
     setLoading(true);
-    const result = await markInquiryRead(id);
-    if (result?.error) {
-      toast.error(result.error);
-    } else {
-      toast.success("Marked as read");
-      setInquiries((prev) =>
-        prev.map((i) => (i.id === id ? { ...i, isRead: true } : i)),
-      );
-      if (selectedInquiry?.id === id) {
-        setSelectedInquiry({ ...selectedInquiry, isRead: true });
+    try {
+      const result = await markInquiryRead(clinicSlug, id);
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Marked as read");
+        setInquiries((prev) =>
+          prev.map((i) => (i.id === id ? { ...i, isRead: true } : i)),
+        );
+        if (selectedInquiry?.id === id) {
+          setSelectedInquiry({ ...selectedInquiry, isRead: true });
+        }
       }
+    } catch {
+      toast.error("Failed to mark inquiry as read.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleDelete = async (id: string) => {
     setLoading(true);
-    const result = await deleteInquiry(id);
-    if (result?.error) {
-      toast.error(result.error);
-    } else {
-      toast.success("Inquiry deleted");
-      setInquiries((prev) => prev.filter((i) => i.id !== id));
-      if (selectedInquiry?.id === id) setSelectedInquiry(null);
+    try {
+      const result = await deleteInquiry(clinicSlug, id);
+      if (result?.error) {
+        toast.error(result.error);
+      } else {
+        toast.success("Inquiry deleted");
+        setInquiries((prev) => prev.filter((i) => i.id !== id));
+        if (selectedInquiry?.id === id) setSelectedInquiry(null);
+      }
+    } catch {
+      toast.error("Failed to delete inquiry.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleBulkMarkRead = async () => {
     setLoading(true);
-    const result = await bulkMarkInquiriesRead(Array.from(selectedIds));
-    if (result?.error) toast.error(result.error);
-    else {
-      toast.success("Inquiries marked as read");
-      setInquiries((prev) =>
-        prev.map((i) => (selectedIds.has(i.id) ? { ...i, isRead: true } : i)),
+    try {
+      const result = await bulkMarkInquiriesRead(
+        clinicSlug,
+        Array.from(selectedIds),
       );
-      if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
-        setSelectedInquiry({ ...selectedInquiry, isRead: true });
+      if (result?.error) toast.error(result.error);
+      else {
+        toast.success("Inquiries marked as read");
+        setInquiries((prev) =>
+          prev.map((i) => (selectedIds.has(i.id) ? { ...i, isRead: true } : i)),
+        );
+        if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
+          setSelectedInquiry({ ...selectedInquiry, isRead: true });
+        }
+        setSelectedIds(new Set());
       }
-      setSelectedIds(new Set());
+    } catch {
+      toast.error("Failed to update inquiries.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleBulkMarkUnread = async () => {
     setLoading(true);
-    const result = await bulkMarkInquiriesUnread(Array.from(selectedIds));
-    if (result?.error) toast.error(result.error);
-    else {
-      toast.success("Inquiries marked as unread");
-      setInquiries((prev) =>
-        prev.map((i) => (selectedIds.has(i.id) ? { ...i, isRead: false } : i)),
+    try {
+      const result = await bulkMarkInquiriesUnread(
+        clinicSlug,
+        Array.from(selectedIds),
       );
-      if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
-        setSelectedInquiry({ ...selectedInquiry, isRead: false });
+      if (result?.error) toast.error(result.error);
+      else {
+        toast.success("Inquiries marked as unread");
+        setInquiries((prev) =>
+          prev.map((i) =>
+            selectedIds.has(i.id) ? { ...i, isRead: false } : i,
+          ),
+        );
+        if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
+          setSelectedInquiry({ ...selectedInquiry, isRead: false });
+        }
+        setSelectedIds(new Set());
       }
-      setSelectedIds(new Set());
+    } catch {
+      toast.error("Failed to update inquiries.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleBulkDelete = async () => {
     setLoading(true);
-    const result = await bulkDeleteInquiries(Array.from(selectedIds));
-    if (result?.error) toast.error(result.error);
-    else {
-      toast.success("Inquiries deleted");
-      setInquiries((prev) => prev.filter((i) => !selectedIds.has(i.id)));
-      if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
-        setSelectedInquiry(null);
+    try {
+      const result = await bulkDeleteInquiries(
+        clinicSlug,
+        Array.from(selectedIds),
+      );
+      if (result?.error) toast.error(result.error);
+      else {
+        toast.success("Inquiries deleted");
+        setInquiries((prev) => prev.filter((i) => !selectedIds.has(i.id)));
+        if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
+          setSelectedInquiry(null);
+        }
+        setSelectedIds(new Set());
       }
-      setSelectedIds(new Set());
+    } catch {
+      toast.error("Failed to delete inquiries.");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const filteredInquiries = inquiries.filter((inq) => {
@@ -614,7 +660,9 @@ export function InquiriesClient({
                       description="Are you sure you want to mark this message as unread?"
                       loading={loading}
                       onConfirm={async () => {
-                        await bulkMarkInquiriesUnread([selectedInquiry.id]);
+                        await bulkMarkInquiriesUnread(clinicSlug, [
+                          selectedInquiry.id,
+                        ]);
                         setSelectedInquiry({
                           ...selectedInquiry,
                           isRead: false,

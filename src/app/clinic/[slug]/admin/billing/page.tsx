@@ -9,43 +9,64 @@ export const metadata: Metadata = { title: "Billing" };
 
 interface Props {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; branch?: string }>;
 }
 
 export default async function BillingPage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const { status, page } = await searchParams;
+  const { status, page, branch } = await searchParams;
   const user = await requireAuth(slug);
   if (!user) redirect(`/clinic/${slug}/login`);
+  const branchFilter =
+    branch && branch !== "ALL" ? { appointment: { branchId: branch } } : {};
 
   // Fetch standard billings (exclude ghost invoices with 0 total)
-  const billings = await prisma.billing.findMany({
-    where: {
-      clinicId: user.clinicId,
-      totalAmount: { gt: 0 },
-    },
-    include: {
-      appointment: {
-        include: {
-          patient: { select: { id: true, firstName: true, lastName: true } },
-          procedures: { include: { procedure: { select: { name: true } } } },
-        },
+  const [billings, branches] = await Promise.all([
+    prisma.billing.findMany({
+      where: {
+        clinicId: user.clinicId,
+        totalAmount: { gt: 0 },
+        ...branchFilter,
       },
-      payments: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+      include: {
+        appointment: {
+          include: {
+            patient: { select: { id: true, firstName: true, lastName: true } },
+            branch: { select: { name: true } },
+            procedures: { include: { procedure: { select: { name: true } } } },
+          },
+        },
+        payments: true,
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.branch.findMany({
+      where: { clinicId: user.clinicId, isActive: true },
+      select: { id: true, name: true, isPrimary: true },
+      orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+    }),
+  ]);
 
   // Fetch installment payments
   const installments = await prisma.installmentPayment.findMany({
     where: {
-      installmentPlan: { clinicId: user.clinicId },
+      installmentPlan: {
+        clinicId: user.clinicId,
+        ...(branch && branch !== "ALL"
+          ? { billing: { appointment: { branchId: branch } } }
+          : {}),
+      },
     },
     include: {
       installmentPlan: {
         include: {
           patient: { select: { id: true, firstName: true, lastName: true } },
-          billing: { include: { payments: true } },
+          billing: {
+            include: {
+              payments: true,
+              appointment: { include: { branch: { select: { name: true } } } },
+            },
+          },
         },
       },
     },
@@ -70,6 +91,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
       paidAmount: paid,
       balance: balance,
       status: balance <= 0 ? "FULLY_PAID" : "PARTIALLY_PAID",
+      branchName: b.appointment.branch?.name || "Main Branch",
       date: b.createdAt.toISOString(),
     };
   });
@@ -83,7 +105,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
     planMap.get(planId)!.push(inst);
   });
 
-  planMap.forEach((planInstallments, planId) => {
+  planMap.forEach((planInstallments) => {
     // Sort chronologically ascending to calculate running totals
     planInstallments.sort((a, b) => a.paidAt.getTime() - b.paidAt.getTime());
 
@@ -112,6 +134,7 @@ export default async function BillingPage({ params, searchParams }: Props) {
         paidAmount: runningPaid, // Cumulative paid up to this transaction
         balance: balance,
         status: balance <= 0 ? "FULLY_PAID" : "PARTIALLY_PAID",
+        branchName: plan.billing?.appointment.branch?.name || "Main Branch",
         date: inst.paidAt.toISOString(),
       });
     });
@@ -140,6 +163,8 @@ export default async function BillingPage({ params, searchParams }: Props) {
           rows={paginatedRows}
           total={filteredRows.length}
           page={parseInt(page || "1")}
+          branches={branches}
+          selectedBranchId={branch || "ALL"}
         />
       </main>
     </>

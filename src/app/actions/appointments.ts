@@ -14,6 +14,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { AppointmentStatus } from "@prisma/client";
 import { getOpenDays, isDayOpen, getDayName } from "@/lib/operating-days";
+import { enqueueClinicEmail } from "@/lib/queue/bull-queue";
 
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 
@@ -42,6 +43,28 @@ async function nextQueueNumber(clinicId: string) {
   return (result[0]?.max_num ?? 0) + 1;
 }
 
+async function resolveActiveBranchId(
+  clinicId: string,
+  requestedBranchId?: string | null,
+) {
+  if (requestedBranchId) {
+    const branch = await prisma.branch.findFirst({
+      where: { id: requestedBranchId, clinicId, isActive: true },
+      select: { id: true },
+    });
+    if (!branch) return null;
+    return branch.id;
+  }
+
+  const branch = await prisma.branch.findFirst({
+    where: { clinicId, isActive: true },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+
+  return branch?.id ?? null;
+}
+
 // ─── public booking ───────────────────────────────────────────────────────────
 
 const bookingSchema = z.object({
@@ -51,6 +74,7 @@ const bookingSchema = z.object({
   serviceType: z.string().min(1, "Service type is required"),
   preferredDate: z.string().min(1, "Preferred date is required"),
   preferredDentistId: z.string().optional(),
+  branchId: z.string().optional(),
   additionalConcern: z.string().optional(),
 });
 
@@ -81,6 +105,7 @@ export async function createPublicBooking(
     preferredDate: formData.get("preferredDate") as string,
     preferredDentistId:
       (formData.get("preferredDentistId") as string) || undefined,
+    branchId: (formData.get("branchId") as string) || undefined,
     additionalConcern:
       (formData.get("additionalConcern") as string) || undefined,
   };
@@ -95,6 +120,7 @@ export async function createPublicBooking(
     serviceType,
     preferredDate,
     preferredDentistId,
+    branchId,
     additionalConcern,
   } = parsed.data;
 
@@ -123,9 +149,15 @@ export async function createPublicBooking(
   }
 
   try {
+    const resolvedBranchId = await resolveActiveBranchId(clinic.id, branchId);
+    if (!resolvedBranchId) {
+      return { error: "Please select an active clinic branch." };
+    }
+
     const appointment = await prisma.appointment.create({
       data: {
         clinicId: clinic.id,
+        branchId: resolvedBranchId,
         bookingName: fullName,
         bookingPhone: contactNumber,
         bookingEmail: email || null,
@@ -139,34 +171,20 @@ export async function createPublicBooking(
     });
 
     if (email) {
-      try {
-        const emailResult = await sendClinicEmail({
-          to: email,
-          subject: `Booking Received – ${clinic.name}`,
-          html: bookingConfirmationEmail({
-            clinicName: clinic.name,
-            patientName: fullName,
-            preferredDate,
-            service: serviceType,
-          }),
-          clinicSettings: clinic.settings,
+      enqueueClinicEmail({
+        clinicId: clinic.id,
+        to: email,
+        subject: `Booking Received – ${clinic.name}`,
+        html: bookingConfirmationEmail({
           clinicName: clinic.name,
-        });
-
-        if (!emailResult.success) {
-          console.warn(
-            "[Booking Email Skipped/Failed]:",
-            emailResult.error || emailResult.reason,
-          );
-        } else {
-          console.log(
-            "[Booking Email Success]: Sent booking confirmation email to",
-            email,
-          );
-        }
-      } catch (emailError) {
-        console.error("Failed to send booking confirmation email:", emailError);
-      }
+          patientName: fullName,
+          preferredDate,
+          service: serviceType,
+        }),
+        templateType: "BOOKING_CONFIRMATION",
+      }).catch((emailError) => {
+        console.warn("[Booking Email Enqueue Warning]:", emailError);
+      });
     }
 
     return { success: true, appointmentId: appointment.id };
@@ -188,6 +206,7 @@ export async function updateAppointmentStatus(
     dentistId?: string;
     scheduledDate?: string;
     scheduledTime?: string;
+    branchId?: string;
     cancelReason?: string;
   },
 ) {
@@ -222,6 +241,13 @@ export async function updateAppointmentStatus(
       where: { id: appointmentId, clinicId: user.clinicId },
       data: {
         status: status as AppointmentStatus,
+        branchId:
+          data?.branchId || existing.branchId
+            ? await resolveActiveBranchId(
+                user.clinicId,
+                data?.branchId || existing.branchId,
+              )
+            : await resolveActiveBranchId(user.clinicId),
         ...(data?.dentistId && { dentistId: data.dentistId }),
         ...(data?.scheduledDate && {
           scheduledDate: new Date(data.scheduledDate),
@@ -400,6 +426,7 @@ export async function checkInAppointment(
   clinicSlug: string,
   appointmentId: string,
   dentistId?: string | null,
+  branchId?: string | null,
 ) {
   const user = await requireAuth(clinicSlug);
   if (!user) return { error: "Unauthorized" };
@@ -422,9 +449,30 @@ export async function checkInAppointment(
       : appointment.bookingName || "Walk-in Patient";
 
     const finalDentistId =
-      dentistId !== undefined && dentistId !== "none"
+      dentistId !== undefined && dentistId !== "none" && dentistId !== null
         ? dentistId
         : appointment.dentistId;
+
+    if (!finalDentistId) {
+      return { error: "Please select an assigned dentist before checking in." };
+    }
+
+    const finalBranchId = await resolveActiveBranchId(
+      user.clinicId,
+      branchId || appointment.branchId,
+    );
+    if (!finalBranchId) {
+      return { error: "Please select an active clinic branch." };
+    }
+
+    const clinicSettings = await prisma.clinicSettings.findUnique({
+      where: { clinicId: user.clinicId },
+      select: { queueWorkflow: true },
+    });
+    const initialStatus =
+      clinicSettings?.queueWorkflow === "DIRECT_TREATMENT"
+        ? "IN_TREATMENT"
+        : "WAITING";
 
     // Use transaction to atomically get queue number and create entry
     await prisma.$transaction(async (tx) => {
@@ -434,7 +482,11 @@ export async function checkInAppointment(
       tomorrow.setDate(tomorrow.getDate() + 1);
 
       const last = await tx.queueEntry.findFirst({
-        where: { clinicId: user.clinicId, date: { gte: today, lt: tomorrow } },
+        where: {
+          clinicId: user.clinicId,
+          branchId: finalBranchId,
+          date: { gte: today, lt: tomorrow },
+        },
         orderBy: { queueNumber: "desc" },
       });
       const queueNumber = (last?.queueNumber ?? 0) + 1;
@@ -443,17 +495,20 @@ export async function checkInAppointment(
         where: { id: appointmentId },
         data: {
           status: "CHECKED_IN",
-          ...(finalDentistId ? { dentistId: finalDentistId } : {}),
+          dentistId: finalDentistId,
+          branchId: finalBranchId,
         },
       });
 
       await tx.queueEntry.create({
         data: {
           clinicId: user.clinicId,
+          branchId: finalBranchId,
           appointmentId,
           patientName,
           queueNumber,
-          status: "WAITING",
+          status: initialStatus,
+          calledAt: initialStatus === "IN_TREATMENT" ? new Date() : null,
           date: new Date(),
         },
       });
@@ -481,12 +536,34 @@ export async function createManualBooking(
   const preferredDate = formData.get("preferredDate") as string;
   const scheduledTime = formData.get("scheduledTime") as string | null;
   const serviceType = formData.get("serviceType") as string;
+  const branchId = formData.get("branchId") as string | null;
   const notes = formData.get("notes") as string | null;
   const isWalkIn = formData.get("isWalkIn") === "true";
   const bookingName = formData.get("bookingName") as string | null;
 
   if (!preferredDate) return { error: "Date is required" };
   if (!serviceType) return { error: "Service type is required" };
+  if (!dentistId || dentistId === "none" || dentistId.trim() === "") {
+    return { error: "Please select an assigned dentist for this appointment." };
+  }
+
+  // Verify dentist belongs to this clinic
+  const assignedDentist = await prisma.user.findFirst({
+    where: { id: dentistId, clinicId: user.clinicId, isActive: true },
+  });
+  if (!assignedDentist) {
+    return { error: "Selected dentist not found in this clinic." };
+  }
+
+  // Verify patient belongs to this clinic if patientId is provided
+  if (patientId) {
+    const assignedPatient = await prisma.patient.findFirst({
+      where: { id: patientId, clinicId: user.clinicId },
+    });
+    if (!assignedPatient) {
+      return { error: "Selected patient not found in this clinic." };
+    }
+  }
 
   const todayStr = new Date().toISOString().split("T")[0];
   const preferredDateStr = preferredDate.split("T")[0];
@@ -527,9 +604,26 @@ export async function createManualBooking(
   }
 
   try {
+    const resolvedBranchId = await resolveActiveBranchId(
+      user.clinicId,
+      branchId,
+    );
+    if (!resolvedBranchId) {
+      return { error: "Please select an active clinic branch." };
+    }
+
     if (effectiveWalkIn) {
       // Walk-in for TODAY: create appointment + queue entry atomically
       const patientName = bookingName || "Walk-in Patient";
+
+      const clinicSettings = await prisma.clinicSettings.findUnique({
+        where: { clinicId: user.clinicId },
+        select: { queueWorkflow: true },
+      });
+      const initialStatus =
+        clinicSettings?.queueWorkflow === "DIRECT_TREATMENT"
+          ? "IN_TREATMENT"
+          : "WAITING";
 
       let queueNum = 0;
       await prisma.$transaction(async (tx) => {
@@ -541,6 +635,7 @@ export async function createManualBooking(
         const last = await tx.queueEntry.findFirst({
           where: {
             clinicId: user.clinicId,
+            branchId: resolvedBranchId,
             date: { gte: today, lt: tomorrow },
           },
           orderBy: { queueNumber: "desc" },
@@ -550,6 +645,7 @@ export async function createManualBooking(
         const appointment = await tx.appointment.create({
           data: {
             clinicId: user.clinicId,
+            branchId: resolvedBranchId,
             patientId: patientId || null,
             dentistId: dentistId || null,
             bookingName: patientName,
@@ -567,10 +663,12 @@ export async function createManualBooking(
         await tx.queueEntry.create({
           data: {
             clinicId: user.clinicId,
+            branchId: resolvedBranchId,
             appointmentId: appointment.id,
             patientName,
             queueNumber: queueNum,
-            status: "WAITING",
+            status: initialStatus,
+            calledAt: initialStatus === "IN_TREATMENT" ? new Date() : null,
             date: new Date(),
           },
         });
@@ -584,6 +682,7 @@ export async function createManualBooking(
     await prisma.appointment.create({
       data: {
         clinicId: user.clinicId,
+        branchId: resolvedBranchId,
         patientId: patientId || null,
         dentistId: dentistId || null,
         bookingName: bookingName || null,
@@ -704,13 +803,26 @@ export async function addProcedureToAppointment(
       fileName: string;
       fileSize: number;
     };
+    installmentAgreementDocument?: {
+      base64: string;
+      mimeType: string;
+      fileName: string;
+      fileSize: number;
+    };
   },
 ) {
   const user = await requireAuth(clinicSlug);
   if (!user) return { error: "Unauthorized" };
 
-  // Validate price is non-negative
-  if (data.price < 0) return { error: "Price cannot be negative." };
+  // Validate price is non-negative and finite
+  if (
+    typeof data.price !== "number" ||
+    isNaN(data.price) ||
+    !isFinite(data.price) ||
+    data.price < 0
+  ) {
+    return { error: "Price must be a valid non-negative number." };
+  }
 
   try {
     const appointment = await prisma.appointment.findUnique({
@@ -718,6 +830,22 @@ export async function addProcedureToAppointment(
       include: { billing: true },
     });
     if (!appointment) return { error: "Appointment not found" };
+
+    // Verify procedure belongs to this clinic
+    const procedure = await prisma.procedure.findFirst({
+      where: { id: data.procedureId, clinicId: user.clinicId },
+    });
+    if (!procedure) return { error: "Procedure not found in this clinic." };
+
+    // Verify dentist belongs to this clinic if specified
+    if (data.dentistId) {
+      const assignedDentist = await prisma.user.findFirst({
+        where: { id: data.dentistId, clinicId: user.clinicId, isActive: true },
+      });
+      if (!assignedDentist) {
+        return { error: "Assigned dentist not found in this clinic." };
+      }
+    }
 
     const apProc = await prisma.appointmentProcedure.create({
       data: {
@@ -792,6 +920,33 @@ export async function addProcedureToAppointment(
       });
     }
 
+    if (data.installmentAgreementDocument) {
+      await prisma.procedureDocument.create({
+        data: {
+          appointmentProcedureId: apProc.id,
+          type: "INSTALLMENT_AGREEMENT",
+          title: data.installmentAgreementDocument.fileName,
+          content: data.installmentAgreementDocument.base64,
+          mimeType: data.installmentAgreementDocument.mimeType,
+          fileSize: data.installmentAgreementDocument.fileSize,
+        },
+      });
+
+      if (appointment.patientId) {
+        await prisma.patientDocument.create({
+          data: {
+            patientId: appointment.patientId,
+            clinicId: user.clinicId,
+            type: "INSTALLMENT_AGREEMENT",
+            title: `Installment Agreement - ${data.installmentAgreementDocument.fileName}`,
+            content: data.installmentAgreementDocument.base64,
+            mimeType: data.installmentAgreementDocument.mimeType,
+            fileSize: data.installmentAgreementDocument.fileSize,
+          },
+        });
+      }
+    }
+
     if (appointment.billing) {
       const newTotal = Number(appointment.billing.totalAmount) + data.price;
       const newStatus =
@@ -818,6 +973,11 @@ export async function addProcedureToAppointment(
 
     revalidateAppointmentPaths(clinicSlug);
     revalidatePath(`/clinic/${clinicSlug}/admin/billing`);
+    if (appointment.patientId) {
+      revalidatePath(
+        `/clinic/${clinicSlug}/admin/patients/${appointment.patientId}`,
+      );
+    }
     return { success: true };
   } catch (error) {
     console.error("Add procedure to appointment error:", error);
@@ -879,6 +1039,11 @@ export async function deleteProcedureFromAppointment(
 
     revalidateAppointmentPaths(clinicSlug);
     revalidatePath(`/clinic/${clinicSlug}/admin/billing`);
+    if (apProc.appointment.patientId) {
+      revalidatePath(
+        `/clinic/${clinicSlug}/admin/patients/${apProc.appointment.patientId}`,
+      );
+    }
     return { success: true };
   } catch (error) {
     console.error("Delete procedure from appointment error:", error);
@@ -929,6 +1094,8 @@ export async function getFilteredAppointments(
         patient: { select: { firstName: true, lastName: true } },
         bookingName: true,
         dentist: { select: { name: true } },
+        branchId: true,
+        branch: { select: { id: true, name: true } },
       },
       orderBy: { preferredDate: "desc" },
     });
@@ -959,8 +1126,8 @@ export async function linkPatientToAppointment(
 
     if (!appointment) return { error: "Appointment not found." };
 
-    const patient = await prisma.patient.findUnique({
-      where: { id: patientId },
+    const patient = await prisma.patient.findFirst({
+      where: { id: patientId, clinicId: user.clinicId },
     });
 
     if (!patient) return { error: "Patient not found." };
@@ -982,9 +1149,78 @@ export async function linkPatientToAppointment(
     });
 
     revalidateAppointmentPaths(clinicSlug);
+    revalidatePath(`/clinic/${clinicSlug}/admin/treatment/${appointmentId}`);
     return { success: true };
   } catch (error) {
     console.error("Link patient error:", error);
     return { error: "Failed to link patient." };
+  }
+}
+
+// ─── Cancel Treatment Visit ──────────────────────────────────────────────────
+
+export async function cancelTreatmentVisit(
+  clinicSlug: string,
+  appointmentId: string,
+  cancelReason?: string,
+) {
+  const user = await requireAuth(clinicSlug);
+  if (!user) return { error: "Unauthorized" };
+
+  try {
+    const appointment = await prisma.appointment.findFirst({
+      where: { id: appointmentId, clinicId: user.clinicId },
+      include: {
+        queueEntry: true,
+        billing: {
+          include: { payments: true },
+        },
+      },
+    });
+
+    if (!appointment) return { error: "Appointment not found." };
+
+    if (appointment.status === "COMPLETED") {
+      return {
+        error: "Cannot cancel an appointment that has already been completed.",
+      };
+    }
+
+    const totalPaid =
+      appointment.billing?.payments.reduce(
+        (sum, p) => sum + Number(p.amount || 0),
+        0,
+      ) ?? 0;
+
+    if (totalPaid > 0) {
+      return {
+        error: `Cannot cancel visit: payments totaling ₱${totalPaid.toLocaleString()} have already been recorded. Please void or refund payments in Billing first.`,
+      };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          status: "CANCELLED",
+          cancelReason:
+            cancelReason || "Cancelled by staff from treatment chair",
+        },
+      });
+
+      if (appointment.queueEntry) {
+        await tx.queueEntry.update({
+          where: { id: appointment.queueEntry.id },
+          data: { status: "CANCELLED" },
+        });
+      }
+    });
+
+    revalidateAppointmentPaths(clinicSlug);
+    revalidatePath(`/clinic/${clinicSlug}/admin/treatment/${appointmentId}`);
+    return { success: true };
+  } catch (error) {
+    console.error("Cancel treatment visit error:", error);
+    return { error: "Failed to cancel treatment visit." };
   }
 }

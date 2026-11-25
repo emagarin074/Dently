@@ -1,6 +1,8 @@
 "use client";
 
 import { SectionBlock } from "@/lib/website-builder/types";
+import { compressImage } from "@/lib/image-compression";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,21 +58,22 @@ export function ModernTemplateEditor({ section, onUpdateContent }: Props) {
     }[]) || [];
   const contactPhones = (content.contactPhones as string[]) || [];
 
-  const handleImageUpload = (
+  const handleImageUpload = async (
     e: React.ChangeEvent<HTMLInputElement>,
     key: string,
   ) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        alert("Image must be less than 2MB");
-        return;
+      try {
+        const { dataUrl } = await compressImage(file, {
+          maxWidth: 1920,
+          quality: 0.85,
+        });
+        onUpdateContent({ [key]: dataUrl });
+      } catch (err) {
+        console.error("Image compression error:", err);
+        toast.error("Failed to process image. Please try a different image.");
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        onUpdateContent({ [key]: reader.result as string });
-      };
-      reader.readAsDataURL(file);
     }
   };
 
@@ -1041,7 +1044,7 @@ export function ModernTemplateEditor({ section, onUpdateContent }: Props) {
                   onChange={(e) =>
                     onUpdateContent({ footerText: e.target.value })
                   }
-                  placeholder="© 2024 Modern Dental Clinic. All rights reserved."
+                  placeholder="© 2024 Dental Clinic. All rights reserved."
                 />
               </div>
             </AccordionContent>
@@ -1051,3 +1054,5 @@ export function ModernTemplateEditor({ section, onUpdateContent }: Props) {
     </Card>
   );
 }
+
+export const TemplateEditor = ModernTemplateEditor;

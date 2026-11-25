@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/auth";
+import { getClinicAccessStatus } from "@/lib/subscription-status";
 import { z } from "zod";
 
 const templateSchema = z.object({
@@ -17,6 +18,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "No clinic workspace associated with this account" },
       { status: 400 },
+    );
+  if (session.user.role !== "DENTIST_ADMIN")
+    return NextResponse.json(
+      { error: "Forbidden: Admin access required" },
+      { status: 403 },
+    );
+  if (
+    !session.user.clinic ||
+    getClinicAccessStatus(session.user.clinic) !== "ACTIVE"
+  )
+    return NextResponse.json(
+      { error: "Clinic account is not active" },
+      { status: 403 },
     );
 
   let body: unknown;
@@ -62,6 +76,19 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json(
       { error: "No clinic workspace associated with this account" },
       { status: 400 },
+    );
+  if (session.user.role !== "DENTIST_ADMIN")
+    return NextResponse.json(
+      { error: "Forbidden: Admin access required" },
+      { status: 403 },
+    );
+  if (
+    !session.user.clinic ||
+    getClinicAccessStatus(session.user.clinic) !== "ACTIVE"
+  )
+    return NextResponse.json(
+      { error: "Clinic account is not active" },
+      { status: 403 },
     );
 
   const { searchParams } = new URL(req.url);
